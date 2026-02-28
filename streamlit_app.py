@@ -19,11 +19,10 @@ from p2p_pricing import (
 
 st.set_page_config(
     page_title="P2P Pricing Recommender",
-    page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ P2P Energy Pricing Mechanism Recommender")
+st.title("P2P Energy Pricing Mechanism Recommender")
 st.markdown("""
 This tool recommends the best peer-to-peer energy pricing mechanism based on your
 community composition and priorities.
@@ -283,5 +282,4 @@ st.markdown("""
 - **Conventional**: Traditional grid import/export at fixed tariffs
 - **MMR (Mid-Market Rate)**: Dynamic P2P price based on supply-demand balance
 - **Bill-Sharing**: Energy shared free within community; costs distributed ex-post
-- **SDR (Supply-Demand Ratio)**: Incentive-based pricing encouraging supply-demand matching
 """)

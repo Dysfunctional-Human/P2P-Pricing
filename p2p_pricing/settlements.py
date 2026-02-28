@@ -431,8 +431,8 @@ def run_all_settlements(profiles: dict) -> dict:
         lambda_buy_ref, lambda_sell_ref, p2p_allowed
     )
 
-    results['SDR'] = settle_sdr(
-        L, PV, dt, lambda_buy_ref, lambda_sell_ref, p2p_allowed
-    )
+    # results['SDR'] = settle_sdr(
+    #     L, PV, dt, lambda_buy_ref, lambda_sell_ref, p2p_allowed
+    # )
 
     return results

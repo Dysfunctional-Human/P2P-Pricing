@@ -60,7 +60,6 @@ def compute_group_costs(
 
     return costs
 
-
 def compute_fairness_index(
     consumer_savings_pct: float,
     prosumer_savings_pct: float
@@ -68,17 +67,22 @@ def compute_fairness_index(
     """
     Compute fairness index based on savings balance.
 
-    Fairness = 1 - |consumer_sav% - prosumer_sav%| / max_possible_diff
+    Fairness = 1 - |consumer_sav% - prosumer_sav%| / (|consumer_sav%| + |prosumer_sav%|)
 
-    Returns value in [0, 1] where 1 = perfectly fair (equal savings %)
+    Returns value in [0, 1] where 1 = perfectly fair (equal savings %).
+    More sensitive than using a fixed denominator (e.g., 200).
     """
-    # Max possible difference is 200% (one group saves 100%, other loses 100%)
-    max_diff = 200.0
-    actual_diff = abs(consumer_savings_pct - prosumer_savings_pct)
+    eps = 1e-9
+    c = float(consumer_savings_pct)
+    p = float(prosumer_savings_pct)
 
-    fairness = 1.0 - (actual_diff / max_diff)
+    # If neither group sees any change, treat as perfectly fair.
+    if abs(c) < eps and abs(p) < eps:
+        return 1.0
+
+    denom = abs(c) + abs(p)
+    fairness = 1.0 - (abs(c - p) / (denom + eps))
     return max(0.0, min(1.0, fairness))
-
 
 def compute_daily_volatility(
     cost_ts: np.ndarray,
