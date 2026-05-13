@@ -68,6 +68,12 @@ st.sidebar.markdown("Adjust what matters most to your community:")
 w_cost = st.sidebar.slider("Cost Savings", 0.0, 1.0, 0.4, 0.1)
 w_fairness = st.sidebar.slider("Fairness", 0.0, 1.0, 0.3, 0.1)
 w_stability = st.sidebar.slider("Bill Stability", 0.0, 1.0, 0.3, 0.1)
+# Normalize weights so they sum to 1 (if total > 0)
+_total = w_cost + w_fairness + w_stability
+if _total > 0:
+    w_cost = w_cost / _total
+    w_fairness = w_fairness / _total
+    w_stability = w_stability / _total
 
 # Sidebar - Tariff Configuration
 st.sidebar.header("Grid Tariff Settings")
