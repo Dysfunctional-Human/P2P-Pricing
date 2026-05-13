@@ -63,17 +63,86 @@ if total_households == 0:
 
 # Sidebar - Priority Weights
 st.sidebar.header("Priority Weights")
-st.sidebar.markdown("Adjust what matters most to your community:")
+st.sidebar.markdown("Adjust what matters most to your community. The three weights share a budget of 1.0.")
 
-w_cost = st.sidebar.slider("Cost Savings", 0.0, 1.0, 0.4, 0.1)
-w_fairness = st.sidebar.slider("Fairness", 0.0, 1.0, 0.3, 0.1)
-w_stability = st.sidebar.slider("Bill Stability", 0.0, 1.0, 0.3, 0.1)
-# Normalize weights so they sum to 1 (if total > 0)
-_total = w_cost + w_fairness + w_stability
-if _total > 0:
-    w_cost = w_cost / _total
-    w_fairness = w_fairness / _total
-    w_stability = w_stability / _total
+if "w_cost" not in st.session_state:
+    st.session_state.w_cost = 0.4
+if "w_fairness" not in st.session_state:
+    st.session_state.w_fairness = 0.3
+if "w_stability" not in st.session_state:
+    st.session_state.w_stability = 0.3
+
+
+def _clamp_weight(value, upper_bound):
+    return max(0.0, min(float(value), float(upper_bound)))
+
+
+st.session_state.w_cost = _clamp_weight(st.session_state.w_cost, 1.0)
+st.sidebar.slider(
+    "Cost Savings",
+    0.0,
+    1.0,
+    key="w_cost",
+    step=0.1,
+)
+
+remaining_budget = round(max(0.0, 1.0 - st.session_state.w_cost), 10)
+if remaining_budget <= 0.0:
+    st.session_state.w_fairness = 0.0
+    st.sidebar.slider(
+        "Fairness",
+        0.0,
+        1.0,
+        key="w_fairness",
+        step=0.1,
+        disabled=True,
+    )
+else:
+    st.session_state.w_fairness = _clamp_weight(st.session_state.w_fairness, remaining_budget)
+    st.sidebar.slider(
+        "Fairness",
+        0.0,
+        remaining_budget,
+        key="w_fairness",
+        step=0.1,
+    )
+
+remaining_budget = round(max(0.0, 1.0 - st.session_state.w_cost - st.session_state.w_fairness), 10)
+if remaining_budget <= 0.0:
+    st.session_state.w_stability = 0.0
+    st.sidebar.slider(
+        "Bill Stability",
+        0.0,
+        1.0,
+        key="w_stability",
+        step=0.1,
+        disabled=True,
+    )
+else:
+    st.session_state.w_stability = _clamp_weight(st.session_state.w_stability, remaining_budget)
+    st.sidebar.slider(
+        "Bill Stability",
+        0.0,
+        remaining_budget,
+        key="w_stability",
+        step=0.1,
+    )
+
+w_cost = st.session_state.w_cost
+w_fairness = st.session_state.w_fairness
+w_stability = st.session_state.w_stability
+
+# Display the actual weights being used
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Current Weights:**")
+col1, col2, col3 = st.sidebar.columns(3)
+with col1:
+    st.metric("Cost", f"{w_cost:.1%}")
+with col2:
+    st.metric("Fairness", f"{w_fairness:.1%}")
+with col3:
+    st.metric("Stability", f"{w_stability:.1%}")
+st.sidebar.caption(f"Remaining budget: {max(0.0, 1.0 - (w_cost + w_fairness + w_stability)):.1%}")
 
 # Sidebar - DSM Settings
 st.sidebar.header("DSM Settings")
