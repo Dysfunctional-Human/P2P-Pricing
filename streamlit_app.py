@@ -3,6 +3,8 @@
 Run with: streamlit run streamlit_app.py
 """
 
+import inspect
+
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -225,7 +227,8 @@ def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_
     )
     weights = RecommendationWeights(cost_savings=w_c, fairness=w_f, stability=w_s)
 
-    return recommend(
+    recommend_params = inspect.signature(recommend).parameters
+    recommend_kwargs = dict(
         num_consumers=num_c,
         num_small_prosumers=num_sp,
         num_medium_prosumers=num_mp,
@@ -233,8 +236,14 @@ def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_
         weights=weights,
         config=config,
         seed=seed,
-        dsm_alpha=alpha
     )
+
+    if "dsm_alpha" in recommend_params:
+        recommend_kwargs["dsm_alpha"] = alpha
+    elif "alpha" in recommend_params:
+        recommend_kwargs["alpha"] = alpha
+
+    return recommend(**recommend_kwargs)
 
 
 # Generate config hash for caching
