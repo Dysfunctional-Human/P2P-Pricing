@@ -397,6 +397,78 @@ def settle_sdr(
     )
 
 
+def settle_sdr_dsm(
+    L_ref: np.ndarray,
+    PV: np.ndarray,
+    dt: float,
+    lambda_buy_ref: float,
+    lambda_sell_ref: float,
+    p2p_allowed: np.ndarray,
+    periods_per_day: int = 96,
+    days: int = 30,
+    alpha: float = 0.12,
+    max_iter: int = 8,
+    eps_conv: float = 1e-4
+) -> SettlementResult:
+    """
+    SDR with Demand-Side Management: iterative load-shifting in response to P2P prices.
+
+    Each iteration:
+      1. Run SDR settlement on current loads
+      2. Each participant adjusts load based on price signal
+      3. Constraints: daily energy conservation, ±50% per-slot bounds
+      4. Damped update (30% new, 70% old) for stability
+
+    Returns:
+        SettlementResult with bills, cost time series, pricing data, and adjusted loads
+    """
+    N, H = L_ref.shape
+    L_adj = L_ref.copy()
+    damping = 0.3
+
+    for iteration in range(max_iter):
+        L_prev = L_adj.copy()
+
+        sdr_result = settle_sdr(L_adj, PV, dt, lambda_buy_ref, lambda_sell_ref, p2p_allowed)
+        Pr_buy = sdr_result.extra_data['Pr_buy']
+        Pr_sell = sdr_result.extra_data['Pr_sell']
+
+        for i in range(N):
+            prices = np.zeros(H)
+            NP_i = L_adj[i] - PV[i]
+            for h in range(H):
+                if NP_i[h] > 0:
+                    prices[h] = Pr_buy[h]
+                else:
+                    prices[h] = -Pr_sell[h]
+
+            price_signal = prices * dt
+            adjustment = -price_signal / (2 * alpha)
+            new_load = L_ref[i] + adjustment
+
+            for d in range(days):
+                s = d * periods_per_day
+                e = (d + 1) * periods_per_day
+                day_ref_energy = np.sum(L_ref[i, s:e]) * dt
+                new_load[s:e] = np.clip(new_load[s:e], 0.5 * L_ref[i, s:e], 1.5 * L_ref[i, s:e])
+                day_new_energy = np.sum(new_load[s:e]) * dt
+                if day_new_energy > 0:
+                    new_load[s:e] *= day_ref_energy / day_new_energy
+
+            L_adj[i] = (1 - damping) * L_prev[i] + damping * new_load
+
+        max_change = np.max(np.abs(L_adj - L_prev))
+        if max_change < eps_conv:
+            break
+
+    final_result = settle_sdr(L_adj, PV, dt, lambda_buy_ref, lambda_sell_ref, p2p_allowed)
+    final_result.mechanism_name = "SDR"
+    final_result.extra_data['L_adj'] = L_adj
+    final_result.extra_data['L_ref'] = L_ref
+    final_result.extra_data['iterations'] = iteration + 1
+    return final_result
+
+
 def run_all_settlements(profiles: dict) -> dict:
     """
     Run all 4 settlement mechanisms on the given profiles.
@@ -431,8 +503,11 @@ def run_all_settlements(profiles: dict) -> dict:
         lambda_buy_ref, lambda_sell_ref, p2p_allowed
     )
 
-    # results['SDR'] = settle_sdr(
-    #     L, PV, dt, lambda_buy_ref, lambda_sell_ref, p2p_allowed
-    # )
+    results['SDR'] = settle_sdr_dsm(
+        L, PV, dt, lambda_buy_ref, lambda_sell_ref, p2p_allowed,
+        periods_per_day=profiles['config'].periods_per_day,
+        days=profiles['config'].days,
+        alpha=profiles.get('dsm_alpha', 0.12)
+    )
 
     return results

@@ -136,7 +136,8 @@ def recommend(
     num_large_prosumers: int,
     weights: RecommendationWeights = None,
     config: SimulationConfig = None,
-    seed: int = None
+    seed: int = None,
+    dsm_alpha: float = 0.12
 ) -> Recommendation:
     """
     Main entry point for P2P pricing mechanism recommendation.
@@ -170,6 +171,7 @@ def recommend(
     )
 
     # Run all settlement mechanisms
+    profiles['dsm_alpha'] = dsm_alpha
     settlement_results = run_all_settlements(profiles)
 
     # Compute metrics

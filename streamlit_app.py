@@ -75,6 +75,14 @@ if _total > 0:
     w_fairness = w_fairness / _total
     w_stability = w_stability / _total
 
+# Sidebar - DSM Settings
+st.sidebar.header("DSM Settings")
+dsm_alpha = st.sidebar.slider(
+    "Discomfort Coefficient (α)",
+    min_value=0.1, max_value=50.0, value=0.12, step=0.1,
+    help="Higher α = less load shifting (more inconvenience cost). At α>30, DSM behaves like plain SDR. Lower α = more aggressive shifting."
+)
+
 # Sidebar - Tariff Configuration
 st.sidebar.header("Grid Tariff Settings")
 
@@ -139,7 +147,7 @@ weights = RecommendationWeights(
 
 
 @st.cache_data
-def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_s, seed=42):
+def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_s, alpha=0.12, seed=42):
     """Cached recommendation computation."""
     config = SimulationConfig(
         grid_buy_price=grid_buy_price,
@@ -155,12 +163,13 @@ def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_
         num_large_prosumers=num_lp,
         weights=weights,
         config=config,
-        seed=seed
+        seed=seed,
+        dsm_alpha=alpha
     )
 
 
 # Generate config hash for caching
-config_hash = f"{tariff_mode}_{grid_buy_price}_{grid_sell_price}"
+config_hash = f"{tariff_mode}_{grid_buy_price}_{grid_sell_price}_{dsm_alpha}"
 if tariff_config:
     config_hash += f"_{tariff_config.consumer_buy_mode}_{tariff_config.prosumer_buy_mode}"
 
@@ -169,7 +178,7 @@ with st.spinner("Running simulation..."):
     result = get_recommendation(
         config_hash,
         num_consumers, num_small_prosumers, num_medium_prosumers, num_large_prosumers,
-        w_cost, w_fairness, w_stability
+        w_cost, w_fairness, w_stability, dsm_alpha
     )
 
 # Main content
@@ -281,6 +290,174 @@ with col4:
     )
     st.plotly_chart(fig_savings, use_container_width=True)
 
+# SDR Analysis Section
+st.header("SDR Analysis (with DSM)")
+st.markdown("Supply-Demand Ratio pricing with demand-side management: load reshaping and dynamic P2P pricing.")
+
+# Access the settlement results for DSM-specific plots
+@st.cache_data
+def get_dsm_data(_config_hash, num_c, num_sp, num_mp, num_lp, alpha=0.12, seed=42):
+    """Get raw settlement results for DSM visualizations."""
+    from p2p_pricing import generate_all_profiles, run_all_settlements, SimulationConfig
+    sim_config = SimulationConfig(
+        grid_buy_price=grid_buy_price,
+        grid_sell_price=grid_sell_price,
+        tariff_config=tariff_config
+    )
+    profiles = generate_all_profiles(
+        num_consumers=num_c,
+        num_small_prosumers=num_sp,
+        num_medium_prosumers=num_mp,
+        num_large_prosumers=num_lp,
+        config=sim_config,
+        seed=seed
+    )
+    profiles['dsm_alpha'] = alpha
+    settlements = run_all_settlements(profiles)
+    return profiles, settlements
+
+
+profiles_data, settlements_data = get_dsm_data(
+    config_hash, num_consumers, num_small_prosumers,
+    num_medium_prosumers, num_large_prosumers, dsm_alpha
+)
+
+if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
+    dsm_data = settlements_data['SDR'].extra_data
+
+    L_ref = dsm_data['L_ref']
+    L_adj = dsm_data['L_adj']
+    PV = profiles_data['PV']
+    Pr_buy = dsm_data['Pr_buy']
+    Pr_sell = dsm_data['Pr_sell']
+    SDR_ts = dsm_data['SDR']
+    periods_per_day = 96
+    days = 30
+
+    def hourly_avg(ts):
+        reshaped = ts.reshape(days, periods_per_day)
+        hourly = np.zeros((days, 24))
+        for h in range(24):
+            hourly[:, h] = reshaped[:, h*4:(h+1)*4].mean(axis=1)
+        return hourly.mean(axis=0)
+
+    hours = list(range(24))
+
+    dsm_tab1, dsm_tab2, dsm_tab3, dsm_tab4 = st.tabs([
+        "Aggregate Profiles", "Load Reshaping", "SDR Dynamics", "P2P Prices"
+    ])
+
+    with dsm_tab1:
+        L_ref_total = np.sum(L_ref, axis=0)
+        L_adj_total = np.sum(L_adj, axis=0)
+        PV_total = np.sum(PV, axis=0)
+
+        L_ref_h = hourly_avg(L_ref_total)
+        L_adj_h = hourly_avg(L_adj_total)
+        PV_h = hourly_avg(PV_total)
+
+        fig_agg = go.Figure()
+        fig_agg.add_trace(go.Scatter(x=hours, y=L_ref_h, mode='lines', name='Reference Load',
+                                      line=dict(color='blue', width=2)))
+        fig_agg.add_trace(go.Scatter(x=hours, y=L_adj_h, mode='lines', name='Adjusted Load (DSM)',
+                                      line=dict(color='red', width=2)))
+        fig_agg.add_trace(go.Scatter(x=hours, y=PV_h, mode='lines', name='PV Generation',
+                                      line=dict(color='green', width=2, dash='dash')))
+        fig_agg.update_layout(
+            title="Community Aggregate Power Profiles",
+            xaxis_title="Hour of Day", yaxis_title="Community Power (kW)",
+            height=400
+        )
+        st.plotly_chart(fig_agg, use_container_width=True)
+
+        shift_energy = np.sum(np.abs(L_adj_total - L_ref_total)) * 0.25 / 2
+        st.metric("Total Energy Shifted (kWh/day avg)", f"{shift_energy/days:.2f}")
+
+    with dsm_tab2:
+        N = L_ref.shape[0]
+        num_c = profiles_data.get('num_consumers', 0)
+        prosumer_indices = list(range(num_c, min(num_c + 3, N)))
+
+        if prosumer_indices:
+            cols = st.columns(len(prosumer_indices))
+            for col_idx, hh_idx in enumerate(prosumer_indices):
+                ref_h = hourly_avg(L_ref[hh_idx])
+                adj_h = hourly_avg(L_adj[hh_idx])
+                pv_h = hourly_avg(PV[hh_idx])
+
+                fig_hh = go.Figure()
+                fig_hh.add_trace(go.Scatter(x=hours, y=ref_h, mode='lines', name='Reference',
+                                             line=dict(color='blue')))
+                fig_hh.add_trace(go.Scatter(x=hours, y=adj_h, mode='lines', name='Adjusted',
+                                             line=dict(color='red')))
+                fig_hh.add_trace(go.Scatter(x=hours, y=pv_h, mode='lines', name='PV',
+                                             line=dict(color='green', dash='dash')))
+                fig_hh.update_layout(
+                    title=f"Prosumer {col_idx+1}",
+                    xaxis_title="Hour", yaxis_title="Power (kW)",
+                    height=300, showlegend=(col_idx == 0)
+                )
+                with cols[col_idx]:
+                    st.plotly_chart(fig_hh, use_container_width=True)
+
+    with dsm_tab3:
+        sdr_hourly = np.zeros(24)
+        count = np.zeros(24)
+        for d in range(days):
+            for h in range(24):
+                for slot in range(4):
+                    idx = d * periods_per_day + h * 4 + slot
+                    val = SDR_ts[idx]
+                    if np.isfinite(val):
+                        sdr_hourly[h] += val
+                        count[h] += 1
+        mask = count > 0
+        sdr_hourly[mask] /= count[mask]
+
+        fig_sdr = go.Figure()
+        fig_sdr.add_trace(go.Scatter(x=hours, y=sdr_hourly, mode='lines+markers',
+                                      name='SDR', line=dict(color='#1565C0', width=2)))
+        fig_sdr.add_hline(y=1.0, line_dash="dash", line_color="red",
+                          annotation_text="SDR=1 (balanced)")
+        fig_sdr.update_layout(
+            title="Hourly Supply-Demand Ratio (SDR-DSM)",
+            xaxis_title="Hour of Day", yaxis_title="Supply-Demand Ratio",
+            height=400
+        )
+        st.plotly_chart(fig_sdr, use_container_width=True)
+
+        peak_sdr = sdr_hourly[mask].max() if mask.any() else 0
+        peak_hour = hours[np.argmax(sdr_hourly)] if mask.any() else 0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Peak SDR", f"{peak_sdr:.2f}")
+        c2.metric("Peak Hour", f"{peak_hour}:00")
+        c3.metric("DSM Iterations", str(dsm_data.get('iterations', 'N/A')))
+
+    with dsm_tab4:
+        buy_h = hourly_avg(Pr_buy)
+        sell_h = hourly_avg(Pr_sell)
+        lbuy = profiles_data['lambda_buy_ref']
+        lsell = profiles_data['lambda_sell_ref']
+
+        fig_price = go.Figure()
+        fig_price.add_trace(go.Scatter(x=hours, y=buy_h, mode='lines+markers',
+                                        name='P2P Buy Price', line=dict(color='#1565C0', width=2)))
+        fig_price.add_trace(go.Scatter(x=hours, y=sell_h, mode='lines+markers',
+                                        name='P2P Sell Price', line=dict(color='#C62828', width=2)))
+        fig_price.add_hline(y=lbuy, line_dash="dot", line_color="#1565C0",
+                            annotation_text=f"Grid Buy (₹{lbuy:.2f})")
+        fig_price.add_hline(y=lsell, line_dash="dot", line_color="#C62828",
+                            annotation_text=f"Grid Sell (₹{lsell:.2f})")
+        fig_price.update_layout(
+            title="P2P Market Clearing Prices vs Grid Tariffs",
+            xaxis_title="Hour of Day", yaxis_title="Price (₹/kWh)",
+            height=400
+        )
+        st.plotly_chart(fig_price, use_container_width=True)
+
+        avg_spread = np.mean(buy_h - sell_h)
+        st.metric("Average P2P Spread (₹/kWh)", f"{avg_spread:.4f}")
+
 # Footer
 st.markdown("---")
 st.markdown("""
@@ -288,4 +465,5 @@ st.markdown("""
 - **Conventional**: Traditional grid import/export at fixed tariffs
 - **MMR (Mid-Market Rate)**: Dynamic P2P price based on supply-demand balance
 - **Bill-Sharing**: Energy shared free within community; costs distributed ex-post
+- **SDR (Supply-Demand Ratio)**: P2P prices based on real-time supply/demand balance, with demand-side management (controlled by α) allowing participants to shift loads for better prices
 """)
