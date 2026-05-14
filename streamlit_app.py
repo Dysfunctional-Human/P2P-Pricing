@@ -22,6 +22,29 @@ st.set_page_config(
     layout="wide"
 )
 
+AXIS_FONT = dict(color='#1a1a1a', size=13)
+TITLE_FONT = dict(color='#1a1a1a', size=15)
+TICK_FONT = dict(color='#333333', size=11)
+
+
+def style_fig(fig):
+    """Apply dark axis labels and ticks to a plotly figure."""
+    layout_update = dict(
+        xaxis_title_font=AXIS_FONT,
+        yaxis_title_font=AXIS_FONT,
+        xaxis_tickfont=TICK_FONT,
+        yaxis_tickfont=TICK_FONT,
+    )
+    if fig.layout.title and fig.layout.title.text:
+        layout_update['title_font'] = TITLE_FONT
+    fig.update_layout(**layout_update)
+    return fig
+
+st.title("P2P Energy Pricing Mechanism Recommender")
+st.markdown("""
+This tool recommends the best peer-to-peer energy pricing mechanism based on your
+community composition and priorities.
+""")
 st.title("P2P Energy Pricing Dashboard")
 
 # Initialize session state for simulation
@@ -279,14 +302,14 @@ if st.session_state.simulation_run:
             'Score': list(result.scores.values())
         }).sort_values('Score', ascending=True)
 
-        fig_scores = px.bar(
-            scores_df, x='Score', y='Mechanism',
-            orientation='h',
-            color='Score',
-            color_continuous_scale='Greens'
-        )
-        fig_scores.update_layout(showlegend=False, height=300)
-        st.plotly_chart(fig_scores, use_container_width=True)
+    fig_scores = px.bar(
+        scores_df, x='Score', y='Mechanism',
+        orientation='h',
+        color='Score',
+        color_continuous_scale='Greens'
+    )
+    fig_scores.update_layout(showlegend=False, height=300)
+    st.plotly_chart(style_fig(fig_scores), use_container_width=True)
 
     with col2:
         st.header("Community Summary")
@@ -305,7 +328,7 @@ if st.session_state.simulation_run:
         color_discrete_sequence=px.colors.qualitative.Set2
     )
     fig_comp.update_layout(height=300)
-    st.plotly_chart(fig_comp, use_container_width=True)
+    st.plotly_chart(style_fig(fig_comp), use_container_width=True)
 
     # Detailed Metrics
     st.header("Detailed Comparison")
@@ -337,13 +360,13 @@ if st.session_state.simulation_run:
             'Total Cost (Rs)': list(costs.values())
         })
 
-        fig_costs = px.bar(
-            costs_df, x='Mechanism', y='Total Cost (Rs)',
-            color='Mechanism',
-            color_discrete_sequence=px.colors.qualitative.Set1
-        )
-        fig_costs.update_layout(showlegend=False)
-        st.plotly_chart(fig_costs, use_container_width=True)
+    fig_costs = px.bar(
+        costs_df, x='Mechanism', y='Total Cost (Rs)',
+        color='Mechanism',
+        color_discrete_sequence=px.colors.qualitative.Set1
+    )
+    fig_costs.update_layout(showlegend=False)
+    st.plotly_chart(style_fig(fig_costs), use_container_width=True)
 
     with col4:
         st.subheader("Savings by Group")
@@ -363,13 +386,13 @@ if st.session_state.simulation_run:
                 'Savings (%)': m.prosumer_savings_pct
             })
 
-        savings_df = pd.DataFrame(savings_data)
-        fig_savings = px.bar(
-            savings_df, x='Mechanism', y='Savings (%)',
-            color='Group', barmode='group',
-            color_discrete_sequence=['#2ecc71', '#3498db']
-        )
-        st.plotly_chart(fig_savings, use_container_width=True)
+    savings_df = pd.DataFrame(savings_data)
+    fig_savings = px.bar(
+        savings_df, x='Mechanism', y='Savings (%)',
+        color='Group', barmode='group',
+        color_discrete_sequence=['#2ecc71', '#3498db']
+    )
+    st.plotly_chart(style_fig(fig_savings), use_container_width=True)
 
     # SDR Analysis Section
     st.header("SDR Analysis (with DSM)")
@@ -432,23 +455,81 @@ if st.session_state.simulation_run:
             L_adj_total = np.sum(L_adj, axis=0)
             PV_total = np.sum(PV, axis=0)
 
-            L_ref_h = hourly_avg(L_ref_total)
-            L_adj_h = hourly_avg(L_adj_total)
-            PV_h = hourly_avg(PV_total)
+        L_ref_h = hourly_avg(L_ref_total)
+        L_adj_h = hourly_avg(L_adj_total)
+        PV_h = hourly_avg(PV_total)
 
-            fig_agg = go.Figure()
-            fig_agg.add_trace(go.Scatter(x=hours, y=L_ref_h, mode='lines', name='Reference Load',
-                                          line=dict(color='blue', width=2)))
-            fig_agg.add_trace(go.Scatter(x=hours, y=L_adj_h, mode='lines', name='Adjusted Load (DSM)',
-                                          line=dict(color='red', width=2)))
-            fig_agg.add_trace(go.Scatter(x=hours, y=PV_h, mode='lines', name='PV Generation',
-                                          line=dict(color='green', width=2, dash='dash')))
-            fig_agg.update_layout(
-                title="Community Aggregate Power Profiles",
-                xaxis_title="Hour of Day", yaxis_title="Community Power (kW)",
-                height=400
-            )
-            st.plotly_chart(fig_agg, use_container_width=True)
+        # Compute excess PV and deficit regions for shaded areas
+        excess_pv = np.maximum(PV_h - L_adj_h, 0)
+        deficit = np.maximum(L_adj_h - PV_h, 0)
+
+        # Smooth curves using interpolation for nicer look
+        from scipy.interpolate import make_interp_spline
+        hours_fine = np.linspace(0, 23, 200)
+        try:
+            spl_ref = make_interp_spline(hours, L_ref_h, k=3)
+            spl_adj = make_interp_spline(hours, L_adj_h, k=3)
+            spl_pv = make_interp_spline(hours, PV_h, k=3)
+            L_ref_smooth = spl_ref(hours_fine)
+            L_adj_smooth = spl_adj(hours_fine)
+            PV_smooth = spl_pv(hours_fine)
+        except Exception:
+            hours_fine = np.array(hours, dtype=float)
+            L_ref_smooth = L_ref_h
+            L_adj_smooth = L_adj_h
+            PV_smooth = PV_h
+
+        excess_smooth = np.maximum(PV_smooth - L_adj_smooth, 0)
+        deficit_smooth = np.maximum(L_adj_smooth - PV_smooth, 0)
+
+        fig_agg = go.Figure()
+
+        # Deficit fill (between adjusted load and PV where load > PV)
+        fig_agg.add_trace(go.Scatter(
+            x=np.concatenate([hours_fine, hours_fine[::-1]]),
+            y=np.concatenate([L_adj_smooth, np.minimum(PV_smooth, L_adj_smooth)[::-1]]),
+            fill='toself', fillcolor='rgba(255, 150, 150, 0.4)',
+            line=dict(width=0), name='Deficit', showlegend=True
+        ))
+
+        # Excess PV fill (between PV and adjusted load where PV > load)
+        fig_agg.add_trace(go.Scatter(
+            x=np.concatenate([hours_fine, hours_fine[::-1]]),
+            y=np.concatenate([PV_smooth, np.minimum(PV_smooth, L_adj_smooth)[::-1]]),
+            fill='toself', fillcolor='rgba(144, 238, 144, 0.4)',
+            line=dict(width=0), name='Excess PV', showlegend=True
+        ))
+
+        # PV Generation line
+        fig_agg.add_trace(go.Scatter(
+            x=hours_fine, y=PV_smooth, mode='lines', name='Total PV Generation',
+            line=dict(color='green', width=2.5)
+        ))
+
+        # Reference Load (dashed gray)
+        fig_agg.add_trace(go.Scatter(
+            x=hours_fine, y=L_ref_smooth, mode='lines', name='Total Reference Load',
+            line=dict(color='gray', width=2, dash='dash')
+        ))
+
+        # Adjusted Load (solid black)
+        fig_agg.add_trace(go.Scatter(
+            x=hours_fine, y=L_adj_smooth, mode='lines', name='Total Adjusted Load',
+            line=dict(color='black', width=2.5)
+        ))
+
+        fig_agg.update_layout(
+            title="Community Aggregate Power Profiles",
+            xaxis_title="Hour of Day", yaxis_title="Power (kW)",
+            height=450,
+            legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)'),
+            xaxis=dict(dtick=5, range=[0, 24]),
+            yaxis=dict(rangemode='tozero'),
+            plot_bgcolor='white',
+            xaxis_showgrid=True, yaxis_showgrid=True,
+            xaxis_gridcolor='lightgray', yaxis_gridcolor='lightgray',
+        )
+        st.plotly_chart(style_fig(fig_agg), use_container_width=True)
 
             shift_energy = np.sum(np.abs(L_adj_total - L_ref_total)) * 0.25 / 2
             st.metric("Total Energy Shifted (kWh/day avg)", f"{shift_energy/days:.2f}")
@@ -456,8 +537,45 @@ if st.session_state.simulation_run:
         with dsm_tab2:
             N = L_ref.shape[0]
         num_c = profiles_data.get('num_consumers', 0)
-        prosumer_indices = list(range(num_c, min(num_c + 3, N)))
 
+        # Consumer profiles
+        st.markdown("**Sample Consumers (no PV)**")
+        consumer_indices = list(range(min(3, num_c)))
+        if consumer_indices:
+            cols = st.columns(len(consumer_indices))
+            for col_idx, hh_idx in enumerate(consumer_indices):
+                ref_h = hourly_avg(L_ref[hh_idx])
+                adj_h = hourly_avg(L_adj[hh_idx])
+
+                fig_hh = go.Figure()
+                # Fill between reference and adjusted to show shift
+                fig_hh.add_trace(go.Scatter(
+                    x=hours + hours[::-1],
+                    y=list(ref_h) + list(adj_h)[::-1],
+                    fill='toself', fillcolor='rgba(99, 110, 250, 0.12)',
+                    line=dict(width=0), name='Load Shift', showlegend=True
+                ))
+                fig_hh.add_trace(go.Scatter(x=hours, y=ref_h, mode='lines', name='Reference Load',
+                                             line=dict(color='#AB63FA', width=2, dash='dash')))
+                fig_hh.add_trace(go.Scatter(x=hours, y=adj_h, mode='lines', name='Adjusted Load',
+                                             line=dict(color='#636EFA', width=2.5)))
+                fig_hh.update_layout(
+                    title=f"Consumer {col_idx+1}",
+                    xaxis_title="Hour", yaxis_title="Power (kW)",
+                    height=300, showlegend=(col_idx == 0),
+                    plot_bgcolor='#FAFAFA',
+                    xaxis_showgrid=True, yaxis_showgrid=True,
+                    xaxis_gridcolor='#E0E0E0', yaxis_gridcolor='#E0E0E0',
+                    yaxis_rangemode='tozero',
+                )
+                with cols[col_idx]:
+                    st.plotly_chart(style_fig(fig_hh), use_container_width=True)
+        else:
+            st.info("No consumers in the community.")
+
+        # Prosumer profiles
+        st.markdown("**Sample Prosumers (with PV)**")
+        prosumer_indices = list(range(num_c, min(num_c + 3, N)))
         if prosumer_indices:
             cols = st.columns(len(prosumer_indices))
             for col_idx, hh_idx in enumerate(prosumer_indices):
@@ -466,19 +584,30 @@ if st.session_state.simulation_run:
                 pv_h = hourly_avg(PV[hh_idx])
 
                 fig_hh = go.Figure()
-                fig_hh.add_trace(go.Scatter(x=hours, y=ref_h, mode='lines', name='Reference',
-                                             line=dict(color='blue')))
-                fig_hh.add_trace(go.Scatter(x=hours, y=adj_h, mode='lines', name='Adjusted',
-                                             line=dict(color='red')))
-                fig_hh.add_trace(go.Scatter(x=hours, y=pv_h, mode='lines', name='PV',
-                                             line=dict(color='green', dash='dash')))
+                # Fill between reference and adjusted
+                fig_hh.add_trace(go.Scatter(
+                    x=hours + hours[::-1],
+                    y=list(ref_h) + list(adj_h)[::-1],
+                    fill='toself', fillcolor='rgba(99, 110, 250, 0.12)',
+                    line=dict(width=0), name='Load Shift', showlegend=True
+                ))
+                fig_hh.add_trace(go.Scatter(x=hours, y=ref_h, mode='lines', name='Reference Load',
+                                             line=dict(color='#AB63FA', width=2, dash='dash')))
+                fig_hh.add_trace(go.Scatter(x=hours, y=adj_h, mode='lines', name='Adjusted Load',
+                                             line=dict(color='#636EFA', width=2.5)))
+                fig_hh.add_trace(go.Scatter(x=hours, y=pv_h, mode='lines', name='PV Generation',
+                                             line=dict(color='#00CC96', width=2.5)))
                 fig_hh.update_layout(
                     title=f"Prosumer {col_idx+1}",
                     xaxis_title="Hour", yaxis_title="Power (kW)",
-                    height=300, showlegend=(col_idx == 0)
+                    height=300, showlegend=(col_idx == 0),
+                    plot_bgcolor='#FAFAFA',
+                    xaxis_showgrid=True, yaxis_showgrid=True,
+                    xaxis_gridcolor='#E0E0E0', yaxis_gridcolor='#E0E0E0',
+                    yaxis_rangemode='tozero',
                 )
                 with cols[col_idx]:
-                    st.plotly_chart(fig_hh, use_container_width=True)
+                    st.plotly_chart(style_fig(fig_hh), use_container_width=True)
 
     with dsm_tab3:
         sdr_hourly = np.zeros(24)
@@ -504,7 +633,7 @@ if st.session_state.simulation_run:
             xaxis_title="Hour of Day", yaxis_title="Supply-Demand Ratio",
             height=400
         )
-        st.plotly_chart(fig_sdr, use_container_width=True)
+        st.plotly_chart(style_fig(fig_sdr), use_container_width=True)
 
         peak_sdr = sdr_hourly[mask].max() if mask.any() else 0
         peak_hour = hours[np.argmax(sdr_hourly)] if mask.any() else 0
@@ -533,9 +662,229 @@ if st.session_state.simulation_run:
             xaxis_title="Hour of Day", yaxis_title="Price (₹/kWh)",
             height=400
         )
-        st.plotly_chart(fig_price, use_container_width=True)
+        st.plotly_chart(style_fig(fig_price), use_container_width=True)
 
         avg_spread = np.mean(buy_h - sell_h)
         st.metric("Average P2P Spread (₹/kWh)", f"{avg_spread:.4f}")
 
+# Pricing Mechanism Comparison Section
+st.header("Pricing Mechanism Comparison")
 
+comp_tab1, comp_tab2, comp_tab3, comp_tab4 = st.tabs([
+    "Daily Savings (%)", "Consumer vs Prosumer", "Cumulative Costs", "Fairness & Stability"
+])
+
+# Pre-compute daily costs by mechanism and group
+daily_costs_by_mech = {}
+daily_consumer_costs = {}
+daily_prosumer_costs = {}
+num_c = profiles_data.get('num_consumers', 0)
+for mech_name, settlement in settlements_data.items():
+    daily_total = np.zeros(days)
+    daily_cons = np.zeros(days)
+    daily_pros = np.zeros(days)
+    for d in range(days):
+        start = d * periods_per_day
+        end = (d + 1) * periods_per_day
+        daily_total[d] = settlement.cost_ts[:, start:end].sum()
+        if num_c > 0:
+            daily_cons[d] = settlement.cost_ts[:num_c, start:end].sum()
+        daily_pros[d] = settlement.cost_ts[num_c:, start:end].sum()
+    daily_costs_by_mech[mech_name] = daily_total
+    daily_consumer_costs[mech_name] = daily_cons
+    daily_prosumer_costs[mech_name] = daily_pros
+
+colors_map = {'Conventional': '#636363', 'MMR': '#1f77b4', 'Bill-Sharing': '#2ca02c', 'SDR': '#d62728'}
+
+with comp_tab1:
+    st.subheader("Daily Savings vs Conventional")
+    st.markdown("Shows how much each P2P mechanism saves relative to conventional grid pricing each day.")
+
+    conv_daily = daily_costs_by_mech['Conventional']
+    fig_savings_pct = go.Figure()
+    for mech_name, daily_costs in daily_costs_by_mech.items():
+        if mech_name == 'Conventional':
+            continue
+        savings_pct = (conv_daily - daily_costs) / conv_daily * 100
+        fig_savings_pct.add_trace(go.Scatter(
+            x=list(range(1, days + 1)), y=savings_pct,
+            mode='lines+markers', name=mech_name,
+            line=dict(color=colors_map.get(mech_name, '#7f7f7f'), width=2.5),
+            marker=dict(size=5)
+        ))
+    fig_savings_pct.add_hline(y=0, line_dash="dot", line_color="gray")
+    fig_savings_pct.update_layout(
+        xaxis_title="Day", yaxis_title="Savings vs Conventional (%)",
+        height=400, plot_bgcolor='white',
+        xaxis_showgrid=True, yaxis_showgrid=True,
+        xaxis_gridcolor='lightgray', yaxis_gridcolor='lightgray',
+        legend=dict(x=0.01, y=0.99)
+    )
+    st.plotly_chart(style_fig(fig_savings_pct), use_container_width=True)
+
+    # Average savings metrics
+    avg_cols = st.columns(3)
+    for idx, mech_name in enumerate([n for n in daily_costs_by_mech if n != 'Conventional']):
+        avg_sav = ((conv_daily - daily_costs_by_mech[mech_name]) / conv_daily * 100).mean()
+        with avg_cols[idx]:
+            st.metric(f"{mech_name} Avg Savings", f"{avg_sav:.1f}%")
+
+with comp_tab2:
+    st.subheader("Consumer vs Prosumer Daily Costs")
+    st.markdown("Compare how each mechanism affects consumers (no PV) vs prosumers (with PV) separately.")
+
+    col_cons, col_pros = st.columns(2)
+
+    with col_cons:
+        st.markdown("**Consumers**")
+        if num_c > 0:
+            fig_cons = go.Figure()
+            for mech_name, daily_costs in daily_consumer_costs.items():
+                fig_cons.add_trace(go.Scatter(
+                    x=list(range(1, days + 1)), y=daily_costs / max(num_c, 1),
+                    mode='lines', name=mech_name,
+                    line=dict(color=colors_map.get(mech_name, '#7f7f7f'), width=2)
+                ))
+            fig_cons.update_layout(
+                xaxis_title="Day", yaxis_title="Avg Cost per Consumer (₹)",
+                height=350, plot_bgcolor='white',
+                xaxis_showgrid=True, yaxis_showgrid=True,
+                xaxis_gridcolor='lightgray', yaxis_gridcolor='lightgray',
+                legend=dict(x=0.01, y=0.99)
+            )
+            st.plotly_chart(style_fig(fig_cons), use_container_width=True)
+        else:
+            st.info("No consumers in the community.")
+
+    with col_pros:
+        st.markdown("**Prosumers**")
+        num_p = total_households - num_c
+        fig_pros = go.Figure()
+        for mech_name, daily_costs in daily_prosumer_costs.items():
+            fig_pros.add_trace(go.Scatter(
+                x=list(range(1, days + 1)), y=daily_costs / max(num_p, 1),
+                mode='lines', name=mech_name,
+                line=dict(color=colors_map.get(mech_name, '#7f7f7f'), width=2)
+            ))
+        fig_pros.update_layout(
+            xaxis_title="Day", yaxis_title="Avg Cost per Prosumer (₹)",
+            height=350, plot_bgcolor='white',
+            xaxis_showgrid=True, yaxis_showgrid=True,
+            xaxis_gridcolor='lightgray', yaxis_gridcolor='lightgray',
+            legend=dict(x=0.01, y=0.99)
+        )
+        st.plotly_chart(style_fig(fig_pros), use_container_width=True)
+
+    # Grouped bar: 30-day total per group per mechanism
+    st.markdown("**30-Day Average Daily Cost per Household**")
+    group_data = []
+    for mech_name in daily_costs_by_mech:
+        if num_c > 0:
+            group_data.append({
+                'Mechanism': mech_name, 'Group': 'Consumers',
+                'Avg Daily Cost (₹)': daily_consumer_costs[mech_name].mean() / max(num_c, 1)
+            })
+        group_data.append({
+            'Mechanism': mech_name, 'Group': 'Prosumers',
+            'Avg Daily Cost (₹)': daily_prosumer_costs[mech_name].mean() / max(num_p, 1)
+        })
+    group_df = pd.DataFrame(group_data)
+    fig_group = px.bar(group_df, x='Mechanism', y='Avg Daily Cost (₹)',
+                       color='Group', barmode='group',
+                       color_discrete_sequence=['#e74c3c', '#27ae60'])
+    fig_group.update_layout(height=350, plot_bgcolor='white')
+    st.plotly_chart(style_fig(fig_group), use_container_width=True)
+
+with comp_tab3:
+    st.subheader("Cumulative Cost Over Time")
+    fig_cum = go.Figure()
+    for mech_name, daily_costs in daily_costs_by_mech.items():
+        cum_costs = np.cumsum(daily_costs)
+        fig_cum.add_trace(go.Scatter(
+            x=list(range(1, days + 1)), y=cum_costs,
+            mode='lines', name=mech_name,
+            line=dict(color=colors_map.get(mech_name, '#7f7f7f'), width=2.5)
+        ))
+    fig_cum.update_layout(
+        xaxis_title="Day", yaxis_title="Cumulative Cost (₹)",
+        height=400, plot_bgcolor='white',
+        xaxis_showgrid=True, yaxis_showgrid=True,
+        xaxis_gridcolor='lightgray', yaxis_gridcolor='lightgray',
+        legend=dict(x=0.01, y=0.99)
+    )
+    st.plotly_chart(style_fig(fig_cum), use_container_width=True)
+
+    # Show final totals
+    st.markdown("**30-Day Total Costs:**")
+    total_cols = st.columns(len(daily_costs_by_mech))
+    for idx, (mech_name, daily_costs) in enumerate(daily_costs_by_mech.items()):
+        with total_cols[idx]:
+            st.metric(mech_name, f"₹{daily_costs.sum():,.0f}")
+
+with comp_tab4:
+    st.subheader("Fairness & Stability Comparison")
+
+    p2p_mechs = [n for n in result.metrics.mechanisms if n != 'Conventional']
+
+    # Radar/spider chart for multi-dimensional comparison
+    categories = ['Cost Savings (%)', 'Fairness Index', 'Consumer Savings (%)',
+                  'Prosumer Savings (%)', 'Bill Stability']
+
+    fig_radar = go.Figure()
+    for mech_name in p2p_mechs:
+        m = result.metrics.mechanisms[mech_name]
+        stability_score = max(0, 1 - m.daily_cost_volatility / 10) * 100
+        values = [
+            m.cost_savings_pct,
+            m.fairness_index * 100,
+            m.consumer_savings_pct,
+            m.prosumer_savings_pct,
+            stability_score,
+        ]
+        fig_radar.add_trace(go.Scatterpolar(
+            r=values + [values[0]],
+            theta=categories + [categories[0]],
+            name=mech_name,
+            line=dict(color=colors_map.get(mech_name, '#7f7f7f'), width=2),
+            fill='toself', fillcolor=colors_map.get(mech_name, '#7f7f7f').replace(')', ',0.1)').replace('rgb', 'rgba') if 'rgb' in colors_map.get(mech_name, '') else None,
+            opacity=0.8
+        ))
+    fig_radar.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        height=450, showlegend=True
+    )
+    st.plotly_chart(style_fig(fig_radar), use_container_width=True)
+
+    # Bar chart: fairness index comparison
+    col_f, col_s = st.columns(2)
+    with col_f:
+        fairness_data = []
+        for mech_name, m in result.metrics.mechanisms.items():
+            fairness_data.append({'Mechanism': mech_name, 'Fairness Index': m.fairness_index})
+        fairness_df = pd.DataFrame(fairness_data)
+        fig_fair = px.bar(fairness_df, x='Mechanism', y='Fairness Index',
+                          color='Mechanism', color_discrete_map=colors_map)
+        fig_fair.update_layout(showlegend=False, height=300,
+                               yaxis_range=[0, 1], title="Fairness Index (higher = fairer)")
+        st.plotly_chart(style_fig(fig_fair), use_container_width=True)
+
+    with col_s:
+        vol_data = []
+        for mech_name, m in result.metrics.mechanisms.items():
+            vol_data.append({'Mechanism': mech_name, 'Daily Volatility (₹)': m.daily_cost_volatility})
+        vol_df = pd.DataFrame(vol_data)
+        fig_vol = px.bar(vol_df, x='Mechanism', y='Daily Volatility (₹)',
+                         color='Mechanism', color_discrete_map=colors_map)
+        fig_vol.update_layout(showlegend=False, height=300,
+                              title="Daily Cost Volatility (lower = more stable)")
+        st.plotly_chart(style_fig(fig_vol), use_container_width=True)
+
+# Footer
+st.markdown("---")
+st.markdown("""
+**Mechanisms Explained:**
+- **Conventional**: Traditional grid import/export at fixed tariffs
+- **MMR (Mid-Market Rate)**: Dynamic P2P price based on supply-demand balance
+- **Bill-Sharing**: Energy shared free within community; costs distributed ex-post
+- **SDR (Supply-Demand Ratio)**: P2P prices based on real-time supply/demand balance, with demand-side management (controlled by α) allowing participants to shift loads for better prices
+""")
