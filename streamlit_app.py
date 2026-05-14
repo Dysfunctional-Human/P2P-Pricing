@@ -3,8 +3,6 @@
 Run with: streamlit run streamlit_app.py
 """
 
-import inspect
-
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -24,11 +22,15 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("P2P Energy Pricing Mechanism Recommender")
-st.markdown("""
-This tool recommends the best peer-to-peer energy pricing mechanism based on your
-community composition and priorities.
-""")
+st.title("P2P Energy Pricing Dashboard")
+
+# Initialize session state for simulation
+if "simulation_run" not in st.session_state:
+    st.session_state.simulation_run = False
+if "validation_errors" not in st.session_state:
+    st.session_state.validation_errors = []
+if "last_run_params" not in st.session_state:
+    st.session_state.last_run_params = None
 
 # Sidebar - Inputs
 st.sidebar.header("Community Composition")
@@ -65,86 +67,28 @@ if total_households == 0:
 
 # Sidebar - Priority Weights
 st.sidebar.header("Priority Weights")
-st.sidebar.markdown("Adjust what matters most to your community. The three weights share a budget of 1.0.")
+st.sidebar.markdown("Adjust what matters most to your community. The three weights must add up to exactly 1.0.")
 
-if "w_cost" not in st.session_state:
-    st.session_state.w_cost = 0.4
-if "w_fairness" not in st.session_state:
-    st.session_state.w_fairness = 0.3
-if "w_stability" not in st.session_state:
-    st.session_state.w_stability = 0.3
+w_cost = st.sidebar.slider("Cost Savings", 0.0, 1.0, 0.4, 0.01)
+w_fairness = st.sidebar.slider("Fairness", 0.0, 1.0, 0.3, 0.01)
+w_stability = st.sidebar.slider("Bill Stability", 0.0, 1.0, 0.3, 0.01)
 
-
-def _clamp_weight(value, upper_bound):
-    return max(0.0, min(float(value), float(upper_bound)))
-
-
-st.session_state.w_cost = _clamp_weight(st.session_state.w_cost, 1.0)
-st.sidebar.slider(
-    "Cost Savings",
-    0.0,
-    1.0,
-    key="w_cost",
-    step=0.1,
-)
-
-remaining_budget = round(max(0.0, 1.0 - st.session_state.w_cost), 10)
-if remaining_budget <= 0.0:
-    st.session_state.w_fairness = 0.0
-    st.sidebar.slider(
-        "Fairness",
-        0.0,
-        1.0,
-        key="w_fairness",
-        step=0.1,
-        disabled=True,
-    )
-else:
-    st.session_state.w_fairness = _clamp_weight(st.session_state.w_fairness, remaining_budget)
-    st.sidebar.slider(
-        "Fairness",
-        0.0,
-        remaining_budget,
-        key="w_fairness",
-        step=0.1,
-    )
-
-remaining_budget = round(max(0.0, 1.0 - st.session_state.w_cost - st.session_state.w_fairness), 10)
-if remaining_budget <= 0.0:
-    st.session_state.w_stability = 0.0
-    st.sidebar.slider(
-        "Bill Stability",
-        0.0,
-        1.0,
-        key="w_stability",
-        step=0.1,
-        disabled=True,
-    )
-else:
-    st.session_state.w_stability = _clamp_weight(st.session_state.w_stability, remaining_budget)
-    st.sidebar.slider(
-        "Bill Stability",
-        0.0,
-        remaining_budget,
-        key="w_stability",
-        step=0.1,
-    )
-
-w_cost = st.session_state.w_cost
-w_fairness = st.session_state.w_fairness
-w_stability = st.session_state.w_stability
-
-# Display the actual weights being used
+# Display the actual weights and their sum
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Current Weights:**")
 col1, col2, col3 = st.sidebar.columns(3)
 with col1:
-    st.metric("Cost", f"{w_cost:.1%}")
+    st.metric("Cost", f"{w_cost:.2f}")
 with col2:
-    st.metric("Fairness", f"{w_fairness:.1%}")
+    st.metric("Fairness", f"{w_fairness:.2f}")
 with col3:
-    st.metric("Stability", f"{w_stability:.1%}")
-st.sidebar.caption(f"Remaining budget: {max(0.0, 1.0 - (w_cost + w_fairness + w_stability)):.1%}")
+    st.metric("Stability", f"{w_stability:.2f}")
+
+weight_sum = w_cost + w_fairness + w_stability
+if abs(weight_sum - 1.0) < 0.001:
+    st.sidebar.success(f"✓ Sum = {weight_sum:.3f}")
+else:
+    st.sidebar.error(f"✗ Sum = {weight_sum:.3f} (must be 1.0)")
 
 # Sidebar - DSM Settings
 st.sidebar.header("DSM Settings")
@@ -203,6 +147,46 @@ elif tariff_mode == "Random Range":
     grid_buy_price = max(consumer_high, prosumer_high)
     grid_sell_price = sell_price
 
+# Sidebar - Run Simulation Button
+st.sidebar.markdown("---")
+st.sidebar.header("Run Simulation")
+
+def validate_inputs():
+    """Validate all inputs before running simulation."""
+    errors = []
+    
+    # Check minimum community size
+    if total_households < 2:
+        errors.append("❌ Community must have at least 2 households (minimum 1 consumer + 1 prosumer)")
+    
+    # Check that we have prosumers
+    has_prosumer = (num_small_prosumers + num_medium_prosumers + num_large_prosumers) > 0
+    if not has_prosumer:
+        errors.append("❌ Community must have at least 1 prosumer")
+    
+    # Check weights sum to exactly 1.0
+    weight_sum = w_cost + w_fairness + w_stability
+    if abs(weight_sum - 1.0) > 0.001:
+        errors.append(f"❌ Priority weights must sum to exactly 1.0 (currently {weight_sum:.3f})")
+    
+    return errors
+
+# Run validation to determine button state
+validation_errors = validate_inputs()
+button_disabled = len(validation_errors) > 0
+button_type = "secondary" if button_disabled else "primary"
+button_label = "⚠ Fix errors above to run" if button_disabled else "▶ Run Simulation"
+
+if st.sidebar.button(button_label, use_container_width=True, type=button_type, disabled=button_disabled):
+    st.session_state.validation_errors = []
+    st.session_state.simulation_run = True
+    st.session_state.last_run_params = None  # Reset to allow new run with new params
+
+# Display validation errors in sidebar if any
+if validation_errors:
+    for error in validation_errors:
+        st.sidebar.error(error)
+
 # Create config
 config = SimulationConfig(
     grid_buy_price=grid_buy_price,
@@ -227,8 +211,7 @@ def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_
     )
     weights = RecommendationWeights(cost_savings=w_c, fairness=w_f, stability=w_s)
 
-    recommend_params = inspect.signature(recommend).parameters
-    recommend_kwargs = dict(
+    return recommend(
         num_consumers=num_c,
         num_small_prosumers=num_sp,
         num_medium_prosumers=num_mp,
@@ -236,14 +219,8 @@ def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_
         weights=weights,
         config=config,
         seed=seed,
+        dsm_alpha=alpha
     )
-
-    if "dsm_alpha" in recommend_params:
-        recommend_kwargs["dsm_alpha"] = alpha
-    elif "alpha" in recommend_params:
-        recommend_kwargs["alpha"] = alpha
-
-    return recommend(**recommend_kwargs)
 
 
 # Generate config hash for caching
@@ -251,42 +228,68 @@ config_hash = f"{tariff_mode}_{grid_buy_price}_{grid_sell_price}_{dsm_alpha}"
 if tariff_config:
     config_hash += f"_{tariff_config.consumer_buy_mode}_{tariff_config.prosumer_buy_mode}"
 
-# Run recommendation
-with st.spinner("Running simulation..."):
-    result = get_recommendation(
-        config_hash,
-        num_consumers, num_small_prosumers, num_medium_prosumers, num_large_prosumers,
-        w_cost, w_fairness, w_stability, dsm_alpha
-    )
+# Create current parameters snapshot
+current_params = {
+    "num_consumers": num_consumers,
+    "num_small_prosumers": num_small_prosumers,
+    "num_medium_prosumers": num_medium_prosumers,
+    "num_large_prosumers": num_large_prosumers,
+    "w_cost": w_cost,
+    "w_fairness": w_fairness,
+    "w_stability": w_stability,
+    "dsm_alpha": dsm_alpha,
+    "tariff_mode": tariff_mode,
+    "grid_buy_price": grid_buy_price,
+    "grid_sell_price": grid_sell_price
+}
 
-# Main content
-col1, col2 = st.columns([2, 1])
+# Check if parameters have changed since last run (only if there was a previous run)
+if st.session_state.simulation_run and st.session_state.last_run_params is not None:
+    if st.session_state.last_run_params != current_params:
+        st.session_state.simulation_run = False
+        st.session_state.validation_errors = ["⚠️ Parameters changed. Click 'Run Simulation' to update results."]
 
-with col1:
-    st.header("Recommendation")
+# Display validation errors or run simulation
+if st.session_state.simulation_run:
+    # Store parameters as last run params
+    st.session_state.last_run_params = current_params
+    
+    # Run recommendation
+    with st.spinner("Running simulation..."):
+        result = get_recommendation(
+            config_hash,
+            num_consumers, num_small_prosumers, num_medium_prosumers, num_large_prosumers,
+            w_cost, w_fairness, w_stability, dsm_alpha
+        )
 
-    # Recommendation card
-    st.success(f"### Recommended: **{result.recommended_mechanism}**")
-    st.markdown(result.reasoning)
+    # Main content
+    col1, col2 = st.columns([2, 1])
 
-    # Scores bar chart
-    st.subheader("Mechanism Scores")
-    scores_df = pd.DataFrame({
-        'Mechanism': list(result.scores.keys()),
-        'Score': list(result.scores.values())
-    }).sort_values('Score', ascending=True)
+    with col1:
+        st.header("Recommendation")
 
-    fig_scores = px.bar(
-        scores_df, x='Score', y='Mechanism',
-        orientation='h',
-        color='Score',
-        color_continuous_scale='Greens'
-    )
-    fig_scores.update_layout(showlegend=False, height=300)
-    st.plotly_chart(fig_scores, use_container_width=True)
+        # Recommendation card
+        st.success(f"### Recommended: **{result.recommended_mechanism}**")
+        st.markdown(result.reasoning)
 
-with col2:
-    st.header("Community Summary")
+        # Scores bar chart
+        st.subheader("Mechanism Scores")
+        scores_df = pd.DataFrame({
+            'Mechanism': list(result.scores.keys()),
+            'Score': list(result.scores.values())
+        }).sort_values('Score', ascending=True)
+
+        fig_scores = px.bar(
+            scores_df, x='Score', y='Mechanism',
+            orientation='h',
+            color='Score',
+            color_continuous_scale='Greens'
+        )
+        fig_scores.update_layout(showlegend=False, height=300)
+        st.plotly_chart(fig_scores, use_container_width=True)
+
+    with col2:
+        st.header("Community Summary")
     st.metric("Total Households", total_households)
 
     # Pie chart of household composition
@@ -304,155 +307,154 @@ with col2:
     fig_comp.update_layout(height=300)
     st.plotly_chart(fig_comp, use_container_width=True)
 
-# Detailed Metrics
-st.header("Detailed Comparison")
+    # Detailed Metrics
+    st.header("Detailed Comparison")
 
-# Create comparison table
-metrics_data = []
-for name, m in result.metrics.mechanisms.items():
-    metrics_data.append({
-        'Mechanism': name,
-        'Total Cost (Rs)': f"{m.total_cost:,.0f}",
-        'Savings vs Conventional': f"{m.cost_savings_pct:.1f}%",
-        'Consumer Savings': f"{m.consumer_savings_pct:.1f}%",
-        'Prosumer Savings': f"{m.prosumer_savings_pct:.1f}%",
-        'Fairness Index': f"{m.fairness_index:.2f}",
-        'Daily Volatility (Rs)': f"{m.daily_cost_volatility:.2f}"
-    })
-
-metrics_df = pd.DataFrame(metrics_data)
-st.dataframe(metrics_df, use_container_width=True, hide_index=True)
-
-# Charts row
-col3, col4 = st.columns(2)
-
-with col3:
-    st.subheader("Total Costs by Mechanism")
-    costs = {name: m.total_cost for name, m in result.metrics.mechanisms.items()}
-    costs_df = pd.DataFrame({
-        'Mechanism': list(costs.keys()),
-        'Total Cost (Rs)': list(costs.values())
-    })
-
-    fig_costs = px.bar(
-        costs_df, x='Mechanism', y='Total Cost (Rs)',
-        color='Mechanism',
-        color_discrete_sequence=px.colors.qualitative.Set1
-    )
-    fig_costs.update_layout(showlegend=False)
-    st.plotly_chart(fig_costs, use_container_width=True)
-
-with col4:
-    st.subheader("Savings by Group")
-    p2p_mechanisms = [n for n in result.metrics.mechanisms if n != 'Conventional']
-
-    savings_data = []
-    for name in p2p_mechanisms:
-        m = result.metrics.mechanisms[name]
-        savings_data.append({
+    # Create comparison table
+    metrics_data = []
+    for name, m in result.metrics.mechanisms.items():
+        metrics_data.append({
             'Mechanism': name,
-            'Group': 'Consumers',
-            'Savings (%)': m.consumer_savings_pct
-        })
-        savings_data.append({
-            'Mechanism': name,
-            'Group': 'Prosumers',
-            'Savings (%)': m.prosumer_savings_pct
+            'Total Cost (Rs)': f"{m.total_cost:,.0f}",
+            'Savings vs Conventional': f"{m.cost_savings_pct:.1f}%",
+            'Consumer Savings': f"{m.consumer_savings_pct:.1f}%",
+            'Prosumer Savings': f"{m.prosumer_savings_pct:.1f}%",
+            'Fairness Index': f"{m.fairness_index:.2f}",
+            'Daily Volatility (Rs)': f"{m.daily_cost_volatility:.2f}"
         })
 
-    savings_df = pd.DataFrame(savings_data)
-    fig_savings = px.bar(
-        savings_df, x='Mechanism', y='Savings (%)',
-        color='Group', barmode='group',
-        color_discrete_sequence=['#2ecc71', '#3498db']
-    )
-    st.plotly_chart(fig_savings, use_container_width=True)
+    metrics_df = pd.DataFrame(metrics_data)
+    st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
-# SDR Analysis Section
-st.header("SDR Analysis (with DSM)")
-st.markdown("Supply-Demand Ratio pricing with demand-side management: load reshaping and dynamic P2P pricing.")
+    # Charts row
+    col3, col4 = st.columns(2)
 
-# Access the settlement results for DSM-specific plots
-@st.cache_data
-def get_dsm_data(_config_hash, num_c, num_sp, num_mp, num_lp, alpha=0.12, seed=42):
-    """Get raw settlement results for DSM visualizations."""
-    from p2p_pricing import generate_all_profiles, run_all_settlements, SimulationConfig
-    sim_config = SimulationConfig(
-        grid_buy_price=grid_buy_price,
-        grid_sell_price=grid_sell_price,
-        tariff_config=tariff_config
-    )
-    profiles = generate_all_profiles(
-        num_consumers=num_c,
-        num_small_prosumers=num_sp,
-        num_medium_prosumers=num_mp,
-        num_large_prosumers=num_lp,
-        config=sim_config,
-        seed=seed
-    )
-    profiles['dsm_alpha'] = alpha
-    settlements = run_all_settlements(profiles)
-    return profiles, settlements
+    with col3:
+        st.subheader("Total Costs by Mechanism")
+        costs = {name: m.total_cost for name, m in result.metrics.mechanisms.items()}
+        costs_df = pd.DataFrame({
+            'Mechanism': list(costs.keys()),
+            'Total Cost (Rs)': list(costs.values())
+        })
 
-
-profiles_data, settlements_data = get_dsm_data(
-    config_hash, num_consumers, num_small_prosumers,
-    num_medium_prosumers, num_large_prosumers, dsm_alpha
-)
-
-if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
-    dsm_data = settlements_data['SDR'].extra_data
-
-    L_ref = dsm_data['L_ref']
-    L_adj = dsm_data['L_adj']
-    PV = profiles_data['PV']
-    Pr_buy = dsm_data['Pr_buy']
-    Pr_sell = dsm_data['Pr_sell']
-    SDR_ts = dsm_data['SDR']
-    periods_per_day = 96
-    days = 30
-
-    def hourly_avg(ts):
-        reshaped = ts.reshape(days, periods_per_day)
-        hourly = np.zeros((days, 24))
-        for h in range(24):
-            hourly[:, h] = reshaped[:, h*4:(h+1)*4].mean(axis=1)
-        return hourly.mean(axis=0)
-
-    hours = list(range(24))
-
-    dsm_tab1, dsm_tab2, dsm_tab3, dsm_tab4 = st.tabs([
-        "Aggregate Profiles", "Load Reshaping", "SDR Dynamics", "P2P Prices"
-    ])
-
-    with dsm_tab1:
-        L_ref_total = np.sum(L_ref, axis=0)
-        L_adj_total = np.sum(L_adj, axis=0)
-        PV_total = np.sum(PV, axis=0)
-
-        L_ref_h = hourly_avg(L_ref_total)
-        L_adj_h = hourly_avg(L_adj_total)
-        PV_h = hourly_avg(PV_total)
-
-        fig_agg = go.Figure()
-        fig_agg.add_trace(go.Scatter(x=hours, y=L_ref_h, mode='lines', name='Reference Load',
-                                      line=dict(color='blue', width=2)))
-        fig_agg.add_trace(go.Scatter(x=hours, y=L_adj_h, mode='lines', name='Adjusted Load (DSM)',
-                                      line=dict(color='red', width=2)))
-        fig_agg.add_trace(go.Scatter(x=hours, y=PV_h, mode='lines', name='PV Generation',
-                                      line=dict(color='green', width=2, dash='dash')))
-        fig_agg.update_layout(
-            title="Community Aggregate Power Profiles",
-            xaxis_title="Hour of Day", yaxis_title="Community Power (kW)",
-            height=400
+        fig_costs = px.bar(
+            costs_df, x='Mechanism', y='Total Cost (Rs)',
+            color='Mechanism',
+            color_discrete_sequence=px.colors.qualitative.Set1
         )
-        st.plotly_chart(fig_agg, use_container_width=True)
+        fig_costs.update_layout(showlegend=False)
+        st.plotly_chart(fig_costs, use_container_width=True)
 
-        shift_energy = np.sum(np.abs(L_adj_total - L_ref_total)) * 0.25 / 2
-        st.metric("Total Energy Shifted (kWh/day avg)", f"{shift_energy/days:.2f}")
+    with col4:
+        st.subheader("Savings by Group")
+        p2p_mechanisms = [n for n in result.metrics.mechanisms if n != 'Conventional']
 
-    with dsm_tab2:
-        N = L_ref.shape[0]
+        savings_data = []
+        for name in p2p_mechanisms:
+            m = result.metrics.mechanisms[name]
+            savings_data.append({
+                'Mechanism': name,
+                'Group': 'Consumers',
+                'Savings (%)': m.consumer_savings_pct
+            })
+            savings_data.append({
+                'Mechanism': name,
+                'Group': 'Prosumers',
+                'Savings (%)': m.prosumer_savings_pct
+            })
+
+        savings_df = pd.DataFrame(savings_data)
+        fig_savings = px.bar(
+            savings_df, x='Mechanism', y='Savings (%)',
+            color='Group', barmode='group',
+            color_discrete_sequence=['#2ecc71', '#3498db']
+        )
+        st.plotly_chart(fig_savings, use_container_width=True)
+
+    # SDR Analysis Section
+    st.header("SDR Analysis (with DSM)")
+    st.markdown("Supply-Demand Ratio pricing with demand-side management: load reshaping and dynamic P2P pricing.")
+
+    # Access the settlement results for DSM-specific plots
+    @st.cache_data
+    def get_dsm_data(_config_hash, num_c, num_sp, num_mp, num_lp, alpha=0.12, seed=42):
+        """Get raw settlement results for DSM visualizations."""
+        from p2p_pricing import generate_all_profiles, run_all_settlements, SimulationConfig
+        sim_config = SimulationConfig(
+            grid_buy_price=grid_buy_price,
+            grid_sell_price=grid_sell_price,
+            tariff_config=tariff_config
+        )
+        profiles = generate_all_profiles(
+            num_consumers=num_c,
+            num_small_prosumers=num_sp,
+            num_medium_prosumers=num_mp,
+            num_large_prosumers=num_lp,
+            config=sim_config,
+            seed=seed
+        )
+        profiles['dsm_alpha'] = alpha
+        settlements = run_all_settlements(profiles)
+        return profiles, settlements
+
+    profiles_data, settlements_data = get_dsm_data(
+        config_hash, num_consumers, num_small_prosumers,
+        num_medium_prosumers, num_large_prosumers, dsm_alpha
+    )
+
+    if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
+        dsm_data = settlements_data['SDR'].extra_data
+
+        L_ref = dsm_data['L_ref']
+        L_adj = dsm_data['L_adj']
+        PV = profiles_data['PV']
+        Pr_buy = dsm_data['Pr_buy']
+        Pr_sell = dsm_data['Pr_sell']
+        SDR_ts = dsm_data['SDR']
+        periods_per_day = 96
+        days = 30
+
+        def hourly_avg(ts):
+            reshaped = ts.reshape(days, periods_per_day)
+            hourly = np.zeros((days, 24))
+            for h in range(24):
+                hourly[:, h] = reshaped[:, h*4:(h+1)*4].mean(axis=1)
+            return hourly.mean(axis=0)
+
+        hours = list(range(24))
+
+        dsm_tab1, dsm_tab2, dsm_tab3, dsm_tab4 = st.tabs([
+            "Aggregate Profiles", "Load Reshaping", "SDR Dynamics", "P2P Prices"
+        ])
+
+        with dsm_tab1:
+            L_ref_total = np.sum(L_ref, axis=0)
+            L_adj_total = np.sum(L_adj, axis=0)
+            PV_total = np.sum(PV, axis=0)
+
+            L_ref_h = hourly_avg(L_ref_total)
+            L_adj_h = hourly_avg(L_adj_total)
+            PV_h = hourly_avg(PV_total)
+
+            fig_agg = go.Figure()
+            fig_agg.add_trace(go.Scatter(x=hours, y=L_ref_h, mode='lines', name='Reference Load',
+                                          line=dict(color='blue', width=2)))
+            fig_agg.add_trace(go.Scatter(x=hours, y=L_adj_h, mode='lines', name='Adjusted Load (DSM)',
+                                          line=dict(color='red', width=2)))
+            fig_agg.add_trace(go.Scatter(x=hours, y=PV_h, mode='lines', name='PV Generation',
+                                          line=dict(color='green', width=2, dash='dash')))
+            fig_agg.update_layout(
+                title="Community Aggregate Power Profiles",
+                xaxis_title="Hour of Day", yaxis_title="Community Power (kW)",
+                height=400
+            )
+            st.plotly_chart(fig_agg, use_container_width=True)
+
+            shift_energy = np.sum(np.abs(L_adj_total - L_ref_total)) * 0.25 / 2
+            st.metric("Total Energy Shifted (kWh/day avg)", f"{shift_energy/days:.2f}")
+
+        with dsm_tab2:
+            N = L_ref.shape[0]
         num_c = profiles_data.get('num_consumers', 0)
         prosumer_indices = list(range(num_c, min(num_c + 3, N)))
 
@@ -536,12 +538,4 @@ if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
         avg_spread = np.mean(buy_h - sell_h)
         st.metric("Average P2P Spread (₹/kWh)", f"{avg_spread:.4f}")
 
-# Footer
-st.markdown("---")
-st.markdown("""
-**Mechanisms Explained:**
-- **Conventional**: Traditional grid import/export at fixed tariffs
-- **MMR (Mid-Market Rate)**: Dynamic P2P price based on supply-demand balance
-- **Bill-Sharing**: Energy shared free within community; costs distributed ex-post
-- **SDR (Supply-Demand Ratio)**: P2P prices based on real-time supply/demand balance, with demand-side management (controlled by α) allowing participants to shift loads for better prices
-""")
+

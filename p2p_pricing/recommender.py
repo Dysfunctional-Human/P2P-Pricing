@@ -137,7 +137,8 @@ def recommend(
     weights: RecommendationWeights = None,
     config: SimulationConfig = None,
     seed: int = None,
-    dsm_alpha: float = 0.12
+    dsm_alpha: float = 0.12,
+    alpha: float = None
 ) -> Recommendation:
     """
     Main entry point for P2P pricing mechanism recommendation.
@@ -154,6 +155,9 @@ def recommend(
     Returns:
         Recommendation with best mechanism, reasoning, and detailed metrics
     """
+    if alpha is not None:
+        dsm_alpha = alpha
+
     if weights is None:
         weights = RecommendationWeights()
 
