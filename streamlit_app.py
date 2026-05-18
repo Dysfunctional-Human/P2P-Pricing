@@ -531,8 +531,8 @@ if st.session_state.simulation_run:
         )
         st.plotly_chart(style_fig(fig_agg), use_container_width=True)
 
-            shift_energy = np.sum(np.abs(L_adj_total - L_ref_total)) * 0.25 / 2
-            st.metric("Total Energy Shifted (kWh/day avg)", f"{shift_energy/days:.2f}")
+        shift_energy = np.sum(np.abs(L_adj_total - L_ref_total)) * 0.25 / 2
+        st.metric("Total Energy Shifted (kWh/day avg)", f"{shift_energy/days:.2f}")
 
         with dsm_tab2:
             N = L_ref.shape[0]
@@ -878,6 +878,224 @@ with comp_tab4:
         fig_vol.update_layout(showlegend=False, height=300,
                               title="Daily Cost Volatility (lower = more stable)")
         st.plotly_chart(style_fig(fig_vol), use_container_width=True)
+
+# Presentation Mode
+st.markdown("---")
+st.header("Presentation Figures")
+st.markdown("Clean, export-ready figures for slides. Right-click any chart → Save as PNG.")
+
+pres_tab1, pres_tab2, pres_tab3, pres_tab4, pres_tab5 = st.tabs([
+    "1. Power Profiles", "2. Who Saves What?", "3. Mechanism Tradeoffs",
+    "4. P2P Price Dynamics", "5. Summary Table"
+])
+
+with pres_tab1:
+    # Community aggregate with excess/deficit shading
+    if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
+        dsm_data_p = settlements_data['SDR'].extra_data
+        L_ref_p = np.sum(dsm_data_p['L_ref'], axis=0)
+        L_adj_p = np.sum(dsm_data_p['L_adj'], axis=0)
+        PV_p = np.sum(profiles_data['PV'], axis=0)
+
+        def hourly_avg_p(ts):
+            reshaped = ts.reshape(30, 96)
+            hourly = np.zeros((30, 24))
+            for h in range(24):
+                hourly[:, h] = reshaped[:, h*4:(h+1)*4].mean(axis=1)
+            return hourly.mean(axis=0)
+
+        hrs = list(range(24))
+        L_ref_hp = hourly_avg_p(L_ref_p)
+        L_adj_hp = hourly_avg_p(L_adj_p)
+        PV_hp = hourly_avg_p(PV_p)
+
+        from scipy.interpolate import make_interp_spline
+        hrs_fine = np.linspace(0, 23, 200)
+        try:
+            L_ref_s = make_interp_spline(hrs, L_ref_hp, k=3)(hrs_fine)
+            L_adj_s = make_interp_spline(hrs, L_adj_hp, k=3)(hrs_fine)
+            PV_s = make_interp_spline(hrs, PV_hp, k=3)(hrs_fine)
+        except Exception:
+            hrs_fine = np.array(hrs, dtype=float)
+            L_ref_s, L_adj_s, PV_s = L_ref_hp, L_adj_hp, PV_hp
+
+        fig_p1 = go.Figure()
+        fig_p1.add_trace(go.Scatter(
+            x=np.concatenate([hrs_fine, hrs_fine[::-1]]),
+            y=np.concatenate([L_adj_s, np.minimum(PV_s, L_adj_s)[::-1]]),
+            fill='toself', fillcolor='rgba(255, 150, 150, 0.35)',
+            line=dict(width=0), name='Deficit (Grid Import)'
+        ))
+        fig_p1.add_trace(go.Scatter(
+            x=np.concatenate([hrs_fine, hrs_fine[::-1]]),
+            y=np.concatenate([PV_s, np.minimum(PV_s, L_adj_s)[::-1]]),
+            fill='toself', fillcolor='rgba(144, 238, 144, 0.35)',
+            line=dict(width=0), name='Excess PV (P2P Available)'
+        ))
+        fig_p1.add_trace(go.Scatter(x=hrs_fine, y=PV_s, mode='lines',
+                                     name='Total PV Generation', line=dict(color='#2ca02c', width=3)))
+        fig_p1.add_trace(go.Scatter(x=hrs_fine, y=L_ref_s, mode='lines',
+                                     name='Reference Load (no DSM)', line=dict(color='#7f7f7f', width=2.5, dash='dash')))
+        fig_p1.add_trace(go.Scatter(x=hrs_fine, y=L_adj_s, mode='lines',
+                                     name='Adjusted Load (with DSM)', line=dict(color='#1a1a1a', width=3)))
+        fig_p1.update_layout(
+            title="Community Aggregate Power Profiles",
+            xaxis_title="Hour of Day", yaxis_title="Power (kW)",
+            height=500, width=900,
+            legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.9)', font=dict(size=12)),
+            xaxis=dict(dtick=2, range=[0, 24]),
+            yaxis=dict(rangemode='tozero'),
+            plot_bgcolor='white',
+            xaxis_showgrid=True, yaxis_showgrid=True,
+            xaxis_gridcolor='#E0E0E0', yaxis_gridcolor='#E0E0E0',
+            margin=dict(l=60, r=30, t=50, b=50),
+        )
+        st.plotly_chart(style_fig(fig_p1), use_container_width=True)
+
+with pres_tab2:
+    # Grouped bar: savings by group per mechanism
+    p2p_names = [n for n in result.metrics.mechanisms if n != 'Conventional']
+    savings_grp = []
+    for name in p2p_names:
+        m = result.metrics.mechanisms[name]
+        savings_grp.append({'Mechanism': name, 'Group': 'Consumers', 'Savings (%)': m.consumer_savings_pct})
+        savings_grp.append({'Mechanism': name, 'Group': 'Prosumers', 'Savings (%)': m.prosumer_savings_pct})
+    savings_grp_df = pd.DataFrame(savings_grp)
+
+    fig_p2 = px.bar(savings_grp_df, x='Mechanism', y='Savings (%)',
+                    color='Group', barmode='group',
+                    color_discrete_map={'Consumers': '#2ca02c', 'Prosumers': '#1f77b4'},
+                    text='Savings (%)')
+    fig_p2.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+    fig_p2.update_layout(
+        title="Cost Savings by Participant Group",
+        height=450, width=800,
+        plot_bgcolor='white',
+        xaxis_showgrid=False, yaxis_showgrid=True,
+        yaxis_gridcolor='#E0E0E0',
+        yaxis_title="Savings vs Conventional (%)",
+        xaxis_title="Pricing Mechanism",
+        legend=dict(x=0.8, y=0.95, font=dict(size=12)),
+        margin=dict(l=60, r=30, t=50, b=50),
+    )
+    st.plotly_chart(style_fig(fig_p2), use_container_width=True)
+
+with pres_tab3:
+    # Radar chart
+    categories_p = ['Cost Savings', 'Fairness', 'Consumer\nBenefit', 'Prosumer\nBenefit', 'Stability']
+    colors_radar = {'MMR': '#1f77b4', 'Bill-Sharing': '#2ca02c', 'SDR': '#d62728'}
+
+    fig_p3 = go.Figure()
+    for mech_name in p2p_names:
+        m = result.metrics.mechanisms[mech_name]
+        stability_score = max(0, 1 - m.daily_cost_volatility / 10) * 100
+        vals = [
+            m.cost_savings_pct,
+            m.fairness_index * 100,
+            m.consumer_savings_pct,
+            m.prosumer_savings_pct,
+            stability_score,
+        ]
+        fig_p3.add_trace(go.Scatterpolar(
+            r=vals + [vals[0]],
+            theta=categories_p + [categories_p[0]],
+            name=mech_name,
+            line=dict(color=colors_radar.get(mech_name, '#7f7f7f'), width=2.5),
+            fill='toself',
+            opacity=0.75
+        ))
+    fig_p3.update_layout(
+        title="Mechanism Tradeoff Comparison",
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(size=10)),
+            angularaxis=dict(tickfont=dict(size=12, color='#1a1a1a'))
+        ),
+        height=500, width=700,
+        showlegend=True,
+        legend=dict(font=dict(size=13), x=0.85, y=0.95),
+        margin=dict(l=80, r=80, t=50, b=50),
+    )
+    st.plotly_chart(style_fig(fig_p3), use_container_width=True)
+
+with pres_tab4:
+    # P2P price dynamics (SDR)
+    if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
+        Pr_buy_p = settlements_data['SDR'].extra_data['Pr_buy']
+        Pr_sell_p = settlements_data['SDR'].extra_data['Pr_sell']
+        lbuy_p = profiles_data['lambda_buy_ref']
+        lsell_p = profiles_data['lambda_sell_ref']
+
+        buy_hp = hourly_avg_p(Pr_buy_p)
+        sell_hp = hourly_avg_p(Pr_sell_p)
+
+        fig_p4 = go.Figure()
+        # Shaded region between buy and sell (the P2P benefit zone)
+        fig_p4.add_trace(go.Scatter(
+            x=hrs + hrs[::-1],
+            y=list(buy_hp) + list(sell_hp)[::-1],
+            fill='toself', fillcolor='rgba(31, 119, 180, 0.1)',
+            line=dict(width=0), name='P2P Spread', showlegend=True
+        ))
+        fig_p4.add_trace(go.Scatter(x=hrs, y=buy_hp, mode='lines+markers',
+                                     name='P2P Buy Price', line=dict(color='#1565C0', width=2.5),
+                                     marker=dict(size=6)))
+        fig_p4.add_trace(go.Scatter(x=hrs, y=sell_hp, mode='lines+markers',
+                                     name='P2P Sell Price', line=dict(color='#C62828', width=2.5),
+                                     marker=dict(size=6)))
+        fig_p4.add_hline(y=lbuy_p, line_dash="dot", line_color="#1565C0", line_width=2,
+                          annotation_text=f"Grid Buy ₹{lbuy_p:.1f}", annotation_font_size=11)
+        fig_p4.add_hline(y=lsell_p, line_dash="dot", line_color="#C62828", line_width=2,
+                          annotation_text=f"Grid Sell ₹{lsell_p:.1f}", annotation_font_size=11)
+        fig_p4.update_layout(
+            title="SDR-Based P2P Market Prices vs Grid Tariffs",
+            xaxis_title="Hour of Day", yaxis_title="Price (₹/kWh)",
+            height=450, width=850,
+            plot_bgcolor='white',
+            xaxis_showgrid=True, yaxis_showgrid=True,
+            xaxis_gridcolor='#E0E0E0', yaxis_gridcolor='#E0E0E0',
+            xaxis=dict(dtick=2),
+            legend=dict(x=0.6, y=0.95, font=dict(size=12)),
+            margin=dict(l=60, r=30, t=50, b=50),
+        )
+        st.plotly_chart(style_fig(fig_p4), use_container_width=True)
+
+        st.markdown("""
+        **Key insight:** P2P prices always sit between grid buy and grid sell —
+        buyers pay less than grid, sellers earn more than grid feed-in. During solar peak,
+        prices drop as supply increases, incentivizing consumption shift.
+        """)
+
+with pres_tab5:
+    # Summary table
+    summary_data = []
+    for name, m in result.metrics.mechanisms.items():
+        summary_data.append({
+            'Mechanism': name,
+            'Total Cost (₹)': f"{m.total_cost:,.0f}",
+            'Savings vs Grid': f"{m.cost_savings_pct:.1f}%" if name != 'Conventional' else '—',
+            'Consumer Savings': f"{m.consumer_savings_pct:.1f}%" if name != 'Conventional' else '—',
+            'Prosumer Savings': f"{m.prosumer_savings_pct:.1f}%" if name != 'Conventional' else '—',
+            'Fairness Index': f"{m.fairness_index:.3f}",
+            'Volatility (₹/day)': f"{m.daily_cost_volatility:.2f}",
+        })
+    summary_df = pd.DataFrame(summary_data)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown(f"""
+    **Simulation Parameters:**
+    - Community: {num_consumers} consumers + {num_small_prosumers} small + {num_medium_prosumers} medium + {num_large_prosumers} large prosumers = **{total_households} households**
+    - Grid tariff: Buy ₹{grid_buy_price}/kWh, Sell ₹{grid_sell_price}/kWh
+    - DSM discomfort coefficient (α): {dsm_alpha}
+    - Simulation: 30 days, 15-min resolution (96 slots/day)
+    - Priority weights: Cost {w_cost:.0%}, Fairness {w_fairness:.0%}, Stability {w_stability:.0%}
+    """)
+
+    rec_col1, rec_col2 = st.columns([1, 2])
+    with rec_col1:
+        st.success(f"**Recommended: {result.recommended_mechanism}**")
+    with rec_col2:
+        st.markdown(result.reasoning)
 
 # Footer
 st.markdown("---")

@@ -1,18 +1,18 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.4.29)  9 MAY 2026 17:13
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.4.29)  14 MAY 2026 23:10
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
-**ieee.tex
+**
 
 ! Emergency stop.
-<*> ieee.tex
-            
-*** (job aborted, file error in nonstop mode)
+<*> 
+    
+End of file on the terminal!
 
  
 Here is how much of TeX's memory you used:
- 3 strings out of 469006
- 100 string characters out of 5454813
+ 4 strings out of 469006
+ 123 string characters out of 5454813
  433756 words of memory out of 5000000
  28801 multiletter control sequences out of 15000+600000
  627721 words of font info for 40 fonts, out of 8000000 for 9000

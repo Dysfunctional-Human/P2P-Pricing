@@ -1,0 +1,46 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper, margin=0.7in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\begin{document}
+
+\section*{Results}
+
+\begin{enumerate}
+
+\item In prosumer-rich communities without DSM, SDR drives $\pi_t^{\text{int}} \to \pi_{\text{grid}}^{\text{sell}}$ during surplus periods, reducing $C_n$ for consumers. With DSM enabled ($\alpha = 0.12$), prosumers shift $x_{n,t}$ to self-consume, reducing their $P_{n,t}^{\text{im}}$ and capturing the majority of savings.
+
+\item MMR produces balanced group savings across tested compositions ($|\mathcal{C}|/N$ from 0.1 to 0.7), with consumer and prosumer savings within 1--2 percentage points of each other.
+
+\item Bill-Sharing allocates costs proportionally, yielding similar per-group savings in prosumer-dominated communities but lower aggregate savings than MMR or SDR.
+
+\item The mechanism ranking varies with community composition. SDR is favoured in consumer-heavy settings, MMR in balanced/diverse ones, and Bill-Sharing in prosumer-dominated ones under balanced weighting criteria.
+
+\item DSM load-shifting saturates below $\alpha \approx 1$ (bounded by $D_n^{\text{min}} \leq x_{n,t} \leq D_n^{\text{max}}$) and disengages above $\alpha \approx 5$, reverting SDR to price-only settlement.
+
+\end{enumerate}
+
+\vspace{1cm}
+
+\section*{Conclusions}
+
+\begin{enumerate}
+
+\item \textbf{No single mechanism dominates all scenarios.} The optimal choice depends on community composition ($|\mathcal{C}|/N$) and the grid tariff spread ($\pi_{\text{grid}}^{\text{buy}} - \pi_{\text{grid}}^{\text{sell}}$).
+
+\item \textbf{SDR benefits consumers when $\text{SDR}_t \geq 1$} (surplus), collapsing prices to $\pi_t^{\text{buy}} = \pi_t^{\text{sell}} = \pi_{\text{grid}}^{\text{sell}}$. DSM shifts this advantage to prosumers via self-consumption: $x_{n,t} \leftarrow D_{n,t}^{\text{ref}} - \pi_t^{\text{int}} \Delta t / 2\alpha$, reducing their grid dependence ($P_{n,t}^{\text{im}} \to 0$).
+
+\item \textbf{MMR's clearing price adapts to net community balance:}
+$\pi_t^{\text{int}} = \frac{\pi_{\text{grid}}^{\text{buy}} + \pi_{\text{grid}}^{\text{sell}}}{2} + \frac{\pi_{\text{grid}}^{\text{buy}} - \pi_{\text{grid}}^{\text{sell}}}{2} \cdot \frac{\sum_n P_{n,t}^{\text{im}} - \sum_n P_{n,t}^{\text{ex}}}{\sum_n P_{n,t}^{\text{im}} + \sum_n P_{n,t}^{\text{ex}}}$
+--- delivers moderate, stable savings across all compositions. Recommended as default.
+
+\item \textbf{The discomfort parameter $\alpha$ governs DSM intensity.} Below $\alpha \approx 1$, load shifting saturates at the bounds $D_n^{\text{min}} \leq x_{n,t} \leq D_n^{\text{max}}$. Above $\alpha = 5$, DSM disengages and SDR reverts to price-only settlement.
+
+\item \textbf{Wider tariff spreads amplify P2P value} for all mechanisms, as the feasible price band $\pi_{\text{grid}}^{\text{sell}} \leq \pi_t^{\text{int}} \leq \pi_{\text{grid}}^{\text{buy}}$ directly bounds the maximum savings achievable through internal trading.
+
+\end{enumerate}
+
+\end{document}

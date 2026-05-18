@@ -1,0 +1,124 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper, margin=0.5in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{amsmath}
+\usepackage{caption}
+
+\newcommand{\Rs}{Rs.}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\definecolor{wingreen}{HTML}{D4EDDA}
+\definecolor{winblue}{HTML}{CCE5FF}
+\definecolor{winorange}{HTML}{FFE8CC}
+
+\begin{document}
+
+\begin{center}
+{\LARGE \textbf{P2P Pricing Mechanism: Comparative Results}}\\[0.3cm]
+{\large Across Community Sizes, Compositions, and Stakeholder Priorities}\\[0.2cm]
+{\small Simulation: 30 days, 15-min resolution, $\lambda_{\text{buy}}$ = \Rs 6.0/kWh, $\lambda_{\text{sell}}$ = \Rs 3.4/kWh, $\alpha = 0.12$}
+\end{center}
+
+\vspace{0.4cm}
+
+%% TABLE 1: Curated scenarios with consumer/prosumer breakdown
+\section*{Table 1: Savings Breakdown --- Consumer vs.\ Prosumer}
+
+{\small Each scenario shows Total / Consumer / Prosumer savings (\%) and Fairness Index for all three mechanisms.}
+
+\vspace{0.3cm}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.25}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{L{3.4cm} c | R{0.7cm} R{0.7cm} R{0.7cm} C{0.7cm} | R{0.7cm} R{0.7cm} R{0.7cm} C{0.7cm} | R{0.7cm} R{0.7cm} R{0.7cm} C{0.7cm} | l}
+\toprule
+& & \multicolumn{4}{c|}{\textbf{MMR}} & \multicolumn{4}{c|}{\textbf{Bill-Sharing}} & \multicolumn{4}{c|}{\textbf{SDR + DSM}} & \\
+\textbf{Community} & $N$ & Tot & Con & Pro & $\mathcal{F}$ & Tot & Con & Pro & $\mathcal{F}$ & Tot & Con & Pro & $\mathcal{F}$ & \textbf{Best} \\
+\midrule
+\multicolumn{15}{l}{\cellcolor{wingreen}\textit{\textbf{SDR wins: Consumer-heavy --- aggressive DSM offsets low PV with demand flexibility}}} \\[2pt]
+7C+1SP+1MP+1LP & 10 & 8.6 & 5.6 & 26.4 & .35 & 7.5 & 13.8 & \textit{--31} & .00 & 10.1 & 5.6 & 37.2 & .26 & \cellcolor{wingreen}SDR \\
+5C+2SP+2MP+1LP & 10 & 7.9 & 6.5 & 11.0 & .74 & 6.2 & 10.8 & \textit{--3.8} & .00 & 11.5 & 5.7 & 24.1 & .38 & \cellcolor{wingreen}SDR \\
+25C+5SP+5MP+5LP & 40 & 8.0 & 5.7 & 17.3 & .50 & 6.8 & 12.5 & \textit{--16} & .00 & 10.0 & 5.4 & 28.6 & .32 & \cellcolor{wingreen}SDR \\
+30C+10SP+5MP+5LP & 50 & 7.2 & 5.4 & 12.8 & .59 & 6.0 & 11.4 & \textit{--11} & .00 & 9.1 & 5.0 & 22.1 & .37 & \cellcolor{wingreen}SDR \\
+\midrule
+\multicolumn{15}{l}{\cellcolor{winblue}\textit{\textbf{MMR wins: Balanced/diverse --- best fairness--savings trade-off}}} \\[2pt]
+1C+2SP+2MP & 5 & 5.8 & 7.0 & 5.2 & .85 & 3.2 & 5.3 & 2.3 & .61 & 13.1 & 5.9 & 16.2 & .53 & \cellcolor{winblue}MMR \\
+10C+8SP+7MP+5LP & 30 & 8.4 & 7.6 & 9.2 & .90 & 5.9 & 9.2 & 2.4 & .41 & 14.9 & 7.0 & 23.5 & .46 & \cellcolor{winblue}MMR \\
+10C+15SP+15MP+10LP & 50 & 8.1 & 8.1 & 8.1 & 1.0 & 4.9 & 6.7 & 3.9 & .73 & 18.3 & 7.7 & 24.2 & .48 & \cellcolor{winblue}MMR \\
+\midrule
+\multicolumn{15}{l}{\cellcolor{winorange}\textit{\textbf{Bill-Sharing wins: Prosumer-dominated --- only mechanism with equitable distribution}}} \\[2pt]
+1C+1SP+1MP+2LP & 5 & 12.1 & 9.0 & 15.2 & .74 & 7.8 & 8.1 & 7.6 & .97 & 26.3 & 8.6 & 43.6 & .33 & \cellcolor{winorange}BS \\
+1C+2SP+3MP+4LP & 10 & 10.6 & 9.4 & 11.0 & .92 & 5.1 & 4.9 & 5.1 & .97 & 29.8 & 9.1 & 37.2 & .39 & \cellcolor{winorange}BS \\
+5C+5SP+10MP+10LP & 30 & 10.2 & 9.0 & 11.0 & .90 & 5.8 & 6.3 & 5.5 & .93 & 25.5 & 8.7 & 35.6 & .39 & \cellcolor{winorange}BS \\
+3C+2SP+5MP+10LP & 20 & 15.4 & 9.9 & 20.7 & .65 & 8.2 & 6.0 & 10.3 & .74 & 41.3 & 9.8 & 71.8 & .24 & \cellcolor{winorange}BS \\
+\bottomrule
+\end{tabular}
+\caption*{\textbf{Tot} = community-wide savings (\%) vs.\ conventional. \textbf{Con}/\textbf{Pro} = group-specific savings. $\mathcal{F}$ = fairness index. Negative Pro = prosumers pay \emph{more} than conventional. Winner by weighted score (cost 40\%, fairness 30\%, stability 30\%). SDR achieves highest raw savings in \emph{every} scenario but often loses on fairness --- prosumers capture 3--8$\times$ more benefit than consumers.}
+\end{table}
+
+
+\vspace{0.3cm}
+
+%% TABLE 2: Priority sensitivity
+\section*{Table 2: How Stakeholder Priorities Change the Optimal Mechanism}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\small
+\begin{tabular}{L{4cm} c l l l}
+\toprule
+\textbf{Community} & $N$ & \textbf{Cost-first} & \textbf{Balanced} & \textbf{Fairness-first} \\
+ & & {\scriptsize(70/15/15)} & {\scriptsize(40/30/30)} & {\scriptsize(20/60/20)} \\
+\midrule
+7C + 1SP + 1MP + 1LP & 10 & \cellcolor{wingreen}SDR & \cellcolor{wingreen}SDR & \cellcolor{winblue}MMR \\
+30C + 10SP + 5MP + 5LP & 50 & \cellcolor{wingreen}SDR & \cellcolor{wingreen}SDR & \cellcolor{winblue}MMR \\
+10C + 15SP + 15MP + 10LP & 50 & \cellcolor{wingreen}SDR & \cellcolor{winblue}MMR & \cellcolor{winblue}MMR \\
+10C + 8SP + 7MP + 5LP & 30 & \cellcolor{wingreen}SDR & \cellcolor{winblue}MMR & \cellcolor{winblue}MMR \\
+1C + 2SP + 2MP & 5 & \cellcolor{wingreen}SDR & \cellcolor{winblue}MMR & \cellcolor{winblue}MMR \\
+5C + 5SP + 10MP + 10LP & 30 & \cellcolor{wingreen}SDR & \cellcolor{winorange}Bill-Sharing & \cellcolor{winorange}Bill-Sharing \\
+1C + 2SP + 3MP + 4LP & 10 & \cellcolor{wingreen}SDR & \cellcolor{winorange}Bill-Sharing & \cellcolor{winorange}Bill-Sharing \\
+3C + 2SP + 5MP + 10LP & 20 & \cellcolor{wingreen}SDR & \cellcolor{winorange}Bill-Sharing & \cellcolor{winorange}Bill-Sharing \\
+\bottomrule
+\end{tabular}
+\caption*{Weight triplets: (cost / fairness / stability). SDR \emph{always} wins when cost is the dominant priority --- its DSM-enhanced savings (10--41\%) far exceed other mechanisms. But when fairness enters the scoring, MMR or Bill-Sharing take over because SDR's benefits are inequitably distributed.}
+\end{table}
+
+\vspace{0.8cm}
+
+%% TABLE 3: Decision guide
+\section*{Table 3: Decision Guide}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.6}
+\begin{tabular}{L{2.2cm} L{4.2cm} L{3.8cm} L{5cm}}
+\toprule
+\textbf{Mechanism} & \textbf{Best Suited For} & \textbf{Community Profile} & \textbf{Key Trade-off} \\
+\midrule
+\cellcolor{wingreen}\textbf{SDR + DSM} &
+  Any community where maximum cost reduction is the primary goal &
+  Consumer-heavy (limited PV but flexible loads) &
+  Highest savings by far; prosumers gain 3--8$\times$ more than consumers ($\mathcal{F}$ = 0.24--0.53) \\[6pt]
+\cellcolor{winblue}\textbf{MMR} &
+  Balanced or diverse communities seeking fair cost sharing &
+  20--50\% consumers; mixed PV sizes &
+  Nearly equal group savings (Con $\approx$ Pro); $\mathcal{F}$ = 0.85--1.0; robust across compositions \\[6pt]
+\cellcolor{winorange}\textbf{Bill-Sharing} &
+  Prosumer-dominated communities needing guaranteed equity &
+  $C \leq 15\%$; many large PV systems &
+  Consumer and prosumer savings nearly identical ($\mathcal{F} > 0.93$); never harms prosumers \\
+\bottomrule
+\end{tabular}
+\caption*{No single mechanism dominates. SDR maximizes total savings but creates inequity. MMR balances savings and fairness. Bill-Sharing guarantees equity at the cost of lower total savings. The optimal choice is a \emph{policy} decision driven by community values.}
+\end{table}
+
+\end{document}
