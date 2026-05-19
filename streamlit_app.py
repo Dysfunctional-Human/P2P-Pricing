@@ -15,6 +15,8 @@ from p2p_pricing import (
     RecommendationWeights,
     TariffConfig,
 )
+from p2p_pricing.settlements import run_all_settlements
+from p2p_pricing.profiles import generate_all_profiles
 
 
 st.set_page_config(
@@ -55,38 +57,72 @@ if "validation_errors" not in st.session_state:
 if "last_run_params" not in st.session_state:
     st.session_state.last_run_params = None
 
+# Sidebar - Data Source
+st.sidebar.header("Data Source")
+data_source = st.sidebar.radio(
+    "Load Profiles",
+    ["Synthetic (configurable)", "Real Smart Meter Data (India)"],
+    help="Choose between synthetic profiles or real CEEW smart meter data from Bareilly + Mathura (2020)"
+)
+
+use_real_data = data_source == "Real Smart Meter Data (India)"
+
 # Sidebar - Inputs
 st.sidebar.header("Community Composition")
 
-num_consumers = st.sidebar.slider(
-    "Consumers (no PV)",
-    min_value=0, max_value=20, value=5,
-    help="Households without solar panels"
-)
+if use_real_data:
+    st.sidebar.markdown("**Real data**: ~56 homes from Bareilly + Mathura (2020, 15-min resolution).")
 
-num_small_prosumers = st.sidebar.slider(
-    "Small Prosumers (40-60% PV)",
-    min_value=0, max_value=20, value=3,
-    help="PV sized for self-consumption, rarely exports"
-)
+    # Available meters after quality filtering is ~56. Let user pick how many of each.
+    REAL_DATA_MAX_METERS = 56
 
-num_medium_prosumers = st.sidebar.slider(
-    "Medium Prosumers (80-110% PV)",
-    min_value=0, max_value=20, value=4,
-    help="Balanced PV, can export moderate amounts"
-)
+    real_num_consumers = st.sidebar.slider(
+        "Consumers (no PV)",
+        min_value=1, max_value=REAL_DATA_MAX_METERS - 1, value=20,
+        help="Homes without solar panels (from real meter data)"
+    )
+    real_num_prosumers = st.sidebar.slider(
+        "Prosumers (with PV)",
+        min_value=1, max_value=REAL_DATA_MAX_METERS - real_num_consumers,
+        value=min(20, REAL_DATA_MAX_METERS - real_num_consumers),
+        help="Homes that get synthetic PV sized to their real load"
+    )
 
-num_large_prosumers = st.sidebar.slider(
-    "Large Prosumers (130-180% PV)",
-    min_value=0, max_value=20, value=3,
-    help="Large PV systems, significant exporters"
-)
+    num_consumers = real_num_consumers
+    num_small_prosumers = 0
+    num_medium_prosumers = real_num_prosumers
+    num_large_prosumers = 0
+    total_households = real_num_consumers + real_num_prosumers
+else:
+    num_consumers = st.sidebar.slider(
+        "Consumers (no PV)",
+        min_value=0, max_value=20, value=5,
+        help="Households without solar panels"
+    )
 
-total_households = num_consumers + num_small_prosumers + num_medium_prosumers + num_large_prosumers
+    num_small_prosumers = st.sidebar.slider(
+        "Small Prosumers (40-60% PV)",
+        min_value=0, max_value=20, value=3,
+        help="PV sized for self-consumption, rarely exports"
+    )
 
-if total_households == 0:
-    st.error("Please select at least one household.")
-    st.stop()
+    num_medium_prosumers = st.sidebar.slider(
+        "Medium Prosumers (80-110% PV)",
+        min_value=0, max_value=20, value=4,
+        help="Balanced PV, can export moderate amounts"
+    )
+
+    num_large_prosumers = st.sidebar.slider(
+        "Large Prosumers (130-180% PV)",
+        min_value=0, max_value=20, value=3,
+        help="Large PV systems, significant exporters"
+    )
+
+    total_households = num_consumers + num_small_prosumers + num_medium_prosumers + num_large_prosumers
+
+    if total_households == 0:
+        st.error("Please select at least one household.")
+        st.stop()
 
 # Sidebar - Priority Weights
 st.sidebar.header("Priority Weights")
@@ -177,21 +213,22 @@ st.sidebar.header("Run Simulation")
 def validate_inputs():
     """Validate all inputs before running simulation."""
     errors = []
-    
-    # Check minimum community size
-    if total_households < 2:
-        errors.append("❌ Community must have at least 2 households (minimum 1 consumer + 1 prosumer)")
-    
-    # Check that we have prosumers
-    has_prosumer = (num_small_prosumers + num_medium_prosumers + num_large_prosumers) > 0
-    if not has_prosumer:
-        errors.append("❌ Community must have at least 1 prosumer")
-    
+
+    if not use_real_data:
+        # Check minimum community size
+        if total_households < 2:
+            errors.append("❌ Community must have at least 2 households (minimum 1 consumer + 1 prosumer)")
+
+        # Check that we have prosumers
+        has_prosumer = (num_small_prosumers + num_medium_prosumers + num_large_prosumers) > 0
+        if not has_prosumer:
+            errors.append("❌ Community must have at least 1 prosumer")
+
     # Check weights sum to exactly 1.0
     weight_sum = w_cost + w_fairness + w_stability
     if abs(weight_sum - 1.0) > 0.001:
         errors.append(f"❌ Priority weights must sum to exactly 1.0 (currently {weight_sum:.3f})")
-    
+
     return errors
 
 # Run validation to determine button state
@@ -246,13 +283,104 @@ def get_recommendation(_config_hash, num_c, num_sp, num_mp, num_lp, w_c, w_f, w_
     )
 
 
+@st.cache_data
+def load_real_meter_pool():
+    """Load and preprocess all real meter data (cached, runs once)."""
+    from run_real_data import load_meter_data, aggregate_to_15min, find_best_window, clean_and_filter
+    from run_real_data import BAREILLY_FILE, MATHURA_FILE, PERIODS_PER_DAY
+
+    df = load_meter_data(BAREILLY_FILE, MATHURA_FILE)
+    df = aggregate_to_15min(df)
+    start_date = find_best_window(df, num_days=30)
+    pivot = clean_and_filter(df, start_date, num_days=30)
+    return pivot, start_date
+
+
+@st.cache_data
+def load_real_data_profiles(_hash, n_consumers, n_prosumers, buy_price, sell_price, alpha):
+    """Build profiles from real meter data with explicit consumer/prosumer counts."""
+    from run_real_data import (
+        build_load_matrix, generate_pv_for_real_loads,
+        PERIODS_PER_DAY, DT,
+    )
+    from p2p_pricing.profiles import generate_tariffs
+    import numpy as np
+
+    pivot, start_date = load_real_meter_pool()
+
+    N_available = pivot.shape[1]
+    N_needed = n_consumers + n_prosumers
+    if N_needed > N_available:
+        N_needed = N_available
+        n_prosumers = N_available - n_consumers
+
+    # Sort meters by total consumption (descending) - higher consumers become prosumers
+    total_consumption = pivot.sum().sort_values(ascending=False)
+    all_meters = list(total_consumption.index[:N_needed])
+
+    # Prosumers are the top consumers (they'd invest in PV), rest are consumers
+    prosumer_ids = all_meters[:n_prosumers]
+    consumer_ids = all_meters[n_prosumers:]
+
+    # Order: consumers first, prosumers last
+    ordered_ids = consumer_ids + prosumer_ids
+
+    num_days = pivot.shape[0] // PERIODS_PER_DAY
+    L = build_load_matrix(pivot, ordered_ids)
+    N = L.shape[0]
+
+    PV = generate_pv_for_real_loads(L, n_consumers, n_prosumers, num_days, seed=42)
+
+    household_types = ['consumer'] * n_consumers + ['medium_prosumer'] * n_prosumers
+
+    config = SimulationConfig(
+        days=num_days,
+        grid_buy_price=buy_price,
+        grid_sell_price=sell_price,
+    )
+
+    lambda_buy_ind, lambda_sell_ind, lambda_buy_ref, lambda_sell_ref = \
+        generate_tariffs(household_types, buy_price, sell_price)
+
+    # P2P availability
+    H = L.shape[1]
+    p2p_allowed = np.ones(H, dtype=bool)
+    np.random.seed(142)
+    for _ in range(3):
+        s = np.random.randint(0, H - 8)
+        p2p_allowed[s:s + 8] = False
+
+    profiles = {
+        'L': L,
+        'PV': PV,
+        'p2p_allowed': p2p_allowed,
+        'lambda_buy_ind': lambda_buy_ind,
+        'lambda_sell_ind': lambda_sell_ind,
+        'lambda_buy_ref': lambda_buy_ref,
+        'lambda_sell_ref': lambda_sell_ref,
+        'household_types': household_types,
+        'config': config,
+        'num_consumers': n_consumers,
+        'num_small_prosumers': 0,
+        'num_medium_prosumers': n_prosumers,
+        'num_large_prosumers': 0,
+        'dsm_alpha': alpha,
+    }
+
+    settlements = run_all_settlements(profiles)
+    return profiles, settlements, start_date
+
+
 # Generate config hash for caching
-config_hash = f"{tariff_mode}_{grid_buy_price}_{grid_sell_price}_{dsm_alpha}"
+config_hash = f"{tariff_mode}_{grid_buy_price}_{grid_sell_price}_{dsm_alpha}_{data_source}"
 if tariff_config:
     config_hash += f"_{tariff_config.consumer_buy_mode}_{tariff_config.prosumer_buy_mode}"
+if use_real_data:
+    config_hash += f"_{real_num_consumers}_{real_num_prosumers}"
 
 # Create current parameters snapshot
 current_params = {
+    "data_source": data_source,
     "num_consumers": num_consumers,
     "num_small_prosumers": num_small_prosumers,
     "num_medium_prosumers": num_medium_prosumers,
@@ -263,7 +391,7 @@ current_params = {
     "dsm_alpha": dsm_alpha,
     "tariff_mode": tariff_mode,
     "grid_buy_price": grid_buy_price,
-    "grid_sell_price": grid_sell_price
+    "grid_sell_price": grid_sell_price,
 }
 
 # Check if parameters have changed since last run (only if there was a previous run)
@@ -276,14 +404,53 @@ if st.session_state.simulation_run and st.session_state.last_run_params is not N
 if st.session_state.simulation_run:
     # Store parameters as last run params
     st.session_state.last_run_params = current_params
-    
-    # Run recommendation
-    with st.spinner("Running simulation..."):
-        result = get_recommendation(
-            config_hash,
-            num_consumers, num_small_prosumers, num_medium_prosumers, num_large_prosumers,
-            w_cost, w_fairness, w_stability, dsm_alpha
+
+    if use_real_data:
+        # --- REAL DATA MODE ---
+        with st.spinner("Loading real smart meter data and running settlements..."):
+            real_hash = f"{real_num_consumers}_{real_num_prosumers}_{grid_buy_price}_{grid_sell_price}_{dsm_alpha}"
+            profiles_data, settlements_data, start_date = load_real_data_profiles(
+                real_hash, real_num_consumers, real_num_prosumers,
+                grid_buy_price, grid_sell_price, dsm_alpha
+            )
+
+        num_consumers = profiles_data['num_consumers']
+        num_small_prosumers = 0
+        num_medium_prosumers = profiles_data.get('num_medium_prosumers', 0)
+        num_large_prosumers = 0
+        total_households = profiles_data['L'].shape[0]
+
+        st.info(f"**Real Data**: {total_households} households ({num_consumers}C + "
+                f"{num_medium_prosumers}P) | "
+                f"Window: {start_date.date() if start_date else 'auto'} | 30 days")
+
+        # Build recommendation-compatible result from settlements
+        from p2p_pricing.metrics import compute_all_metrics
+        from p2p_pricing.recommender import Recommendation, compute_weighted_scores
+
+        metrics_report = compute_all_metrics(
+            settlements_data, profiles_data['household_types'], 96
         )
+        weights = RecommendationWeights(cost_savings=w_cost, fairness=w_fairness, stability=w_stability)
+        scores = compute_weighted_scores(metrics_report, weights)
+        best_mech = max(scores, key=scores.get)
+        result = Recommendation(
+            recommended_mechanism=best_mech,
+            reasoning=f"Based on real smart meter data from {total_households} Indian households, "
+                      f"**{best_mech}** scores highest with your priority weights.",
+            scores=scores,
+            metrics=metrics_report,
+            weights_used=weights
+        )
+
+    else:
+        # --- SYNTHETIC MODE ---
+        with st.spinner("Running simulation..."):
+            result = get_recommendation(
+                config_hash,
+                num_consumers, num_small_prosumers, num_medium_prosumers, num_large_prosumers,
+                w_cost, w_fairness, w_stability, dsm_alpha
+            )
 
     # Main content
     col1, col2 = st.columns([2, 1])
@@ -399,31 +566,32 @@ if st.session_state.simulation_run:
     st.markdown("Supply-Demand Ratio pricing with demand-side management: load reshaping and dynamic P2P pricing.")
 
     # Access the settlement results for DSM-specific plots
-    @st.cache_data
-    def get_dsm_data(_config_hash, num_c, num_sp, num_mp, num_lp, alpha=0.12, seed=42):
-        """Get raw settlement results for DSM visualizations."""
-        from p2p_pricing import generate_all_profiles, run_all_settlements, SimulationConfig
-        sim_config = SimulationConfig(
-            grid_buy_price=grid_buy_price,
-            grid_sell_price=grid_sell_price,
-            tariff_config=tariff_config
-        )
-        profiles = generate_all_profiles(
-            num_consumers=num_c,
-            num_small_prosumers=num_sp,
-            num_medium_prosumers=num_mp,
-            num_large_prosumers=num_lp,
-            config=sim_config,
-            seed=seed
-        )
-        profiles['dsm_alpha'] = alpha
-        settlements = run_all_settlements(profiles)
-        return profiles, settlements
+    if not use_real_data:
+        @st.cache_data
+        def get_dsm_data(_config_hash, num_c, num_sp, num_mp, num_lp, alpha=0.12, seed=42):
+            """Get raw settlement results for DSM visualizations."""
+            from p2p_pricing import generate_all_profiles, run_all_settlements, SimulationConfig
+            sim_config = SimulationConfig(
+                grid_buy_price=grid_buy_price,
+                grid_sell_price=grid_sell_price,
+                tariff_config=tariff_config
+            )
+            profiles = generate_all_profiles(
+                num_consumers=num_c,
+                num_small_prosumers=num_sp,
+                num_medium_prosumers=num_mp,
+                num_large_prosumers=num_lp,
+                config=sim_config,
+                seed=seed
+            )
+            profiles['dsm_alpha'] = alpha
+            settlements = run_all_settlements(profiles)
+            return profiles, settlements
 
-    profiles_data, settlements_data = get_dsm_data(
-        config_hash, num_consumers, num_small_prosumers,
-        num_medium_prosumers, num_large_prosumers, dsm_alpha
-    )
+        profiles_data, settlements_data = get_dsm_data(
+            config_hash, num_consumers, num_small_prosumers,
+            num_medium_prosumers, num_large_prosumers, dsm_alpha
+        )
 
     if 'SDR' in settlements_data and settlements_data['SDR'].extra_data:
         dsm_data = settlements_data['SDR'].extra_data
@@ -435,7 +603,7 @@ if st.session_state.simulation_run:
         Pr_sell = dsm_data['Pr_sell']
         SDR_ts = dsm_data['SDR']
         periods_per_day = 96
-        days = 30
+        days = L_ref.shape[1] // periods_per_day
 
         def hourly_avg(ts):
             reshaped = ts.reshape(days, periods_per_day)
@@ -674,6 +842,11 @@ comp_tab1, comp_tab2, comp_tab3, comp_tab4 = st.tabs([
     "Daily Savings (%)", "Consumer vs Prosumer", "Cumulative Costs", "Fairness & Stability"
 ])
 
+# Ensure days/periods_per_day are defined for this section
+if 'days' not in dir() or 'periods_per_day' not in dir():
+    periods_per_day = 96
+    days = profiles_data['L'].shape[1] // periods_per_day
+
 # Pre-compute daily costs by mechanism and group
 daily_costs_by_mech = {}
 daily_consumer_costs = {}
@@ -897,9 +1070,11 @@ with pres_tab1:
         L_adj_p = np.sum(dsm_data_p['L_adj'], axis=0)
         PV_p = np.sum(profiles_data['PV'], axis=0)
 
+        _days_p = len(L_ref_p) // 96
+
         def hourly_avg_p(ts):
-            reshaped = ts.reshape(30, 96)
-            hourly = np.zeros((30, 24))
+            reshaped = ts.reshape(_days_p, 96)
+            hourly = np.zeros((_days_p, 24))
             for h in range(24):
                 hourly[:, h] = reshaped[:, h*4:(h+1)*4].mean(axis=1)
             return hourly.mean(axis=0)

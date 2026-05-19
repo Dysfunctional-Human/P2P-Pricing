@@ -313,6 +313,7 @@ def settle_sdr_dsm(L_ref, PV, dt, lbuy, lsell, p2p_allowed, alpha=0.12, max_iter
     Uses damped updates (mix 30% new, 70% old) for convergence stability.
     """
     N, H = L_ref.shape
+    num_days = H // PERIODS_PER_DAY
     L_adj = L_ref.copy()
     damping = 0.3
 
@@ -337,7 +338,7 @@ def settle_sdr_dsm(L_ref, PV, dt, lbuy, lsell, p2p_allowed, alpha=0.12, max_iter
             new_load = L_ref[i] + adjustment
 
             # Project to constraints per day
-            for d in range(DAYS):
+            for d in range(num_days):
                 s = d * PERIODS_PER_DAY
                 e = (d + 1) * PERIODS_PER_DAY
                 day_ref_energy = np.sum(L_ref[i, s:e]) * dt
