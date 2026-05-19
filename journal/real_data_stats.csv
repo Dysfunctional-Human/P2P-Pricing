@@ -1,0 +1,2 @@
+num_meters,num_days,avg_daily_load_kwh,std_daily_load_kwh,peak_hour_load,min_hour_load
+56,30,4.146495967261905,0.4543281105876837,9.0,4.5
